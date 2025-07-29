@@ -1,9 +1,5 @@
 #!/bin/bash
-#!/bin/bash
-echo "                                                                              "
-echo "                                                                              "
-echo "                                                                              "
-echo "                                                                              "
+
 echo "                                                                              "
 echo "                                                                              "
 echo "vvvvvvv           vvvvvvvaaaaaaaaaaaaa  rrrrr   rrrrrrrrr       ssssssssss   "
