@@ -130,8 +130,8 @@ flowchart TD
     CheckDeps[Verificar dependências instaladas] -->|Ausentes| ErrorDeps[Erro: Use -i]
     CheckDeps -->|OK| SetupOut[Criar estrutura de diretórios]
     
-    SetupOut --> DetermineInput[Definir INPUT:\nURL ou Arquivo]
-    DetermineInput --> Scans[Executar módulos\nde escaneamento]
+    SetupOut --> DetermineInput[Definir INPUT:URL ou Arquivo]
+    DetermineInput --> Scans[Executar módulos de escaneamento]
 
     subgraph Escaneamentos
         Scans --> Xray[Xray Scan\nXSS, SQLi, Cmd Inj]
