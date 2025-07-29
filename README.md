@@ -114,7 +114,7 @@ flowchart TD
     Start([Início do Script]) --> Args[Parsear argumentos]
     
     Args --> CheckInstallDeps{Flag -i foi usada?}
-    CheckInstallDeps -- Sim --> InstallDeps[Executar install_deps\ne sair]
+    CheckInstallDeps -- Sim --> InstallDeps[Executar Install e sair]
     CheckInstallDeps -- Não --> ValidateInput[Validar entrada: -u ou -f]
 
     ValidateInput -->|Sem -u ou -f| ErrorNoInput[Erro: URL ou arquivo necessário]
@@ -127,8 +127,8 @@ flowchart TD
     ConfigurarProxy --> CheckDeps
     SkipProxy --> CheckDeps
 
-    CheckDeps[Verificar dependências\ninstaladas] -->|Ausentes| ErrorDeps[Erro: Use -i]
-    CheckDeps -->|OK| SetupOut[Criar estrutura\nde diretórios]
+    CheckDeps[Verificar dependências instaladas] -->|Ausentes| ErrorDeps[Erro: Use -i]
+    CheckDeps -->|OK| SetupOut[Criar estrutura de diretórios]
     
     SetupOut --> DetermineInput[Definir INPUT:\nURL ou Arquivo]
     DetermineInput --> Scans[Executar módulos\nde escaneamento]
