@@ -1,10 +1,7 @@
 <img src="https://capsule-render.vercel.app/api?type=transparent&height=300&color=gradient&text=VARS&desc=Vulnerability%20Assessment%20and%20Recon%20Script&fontAlignY=50&descSize=30&fontSize=100&descAlignY=68">
 
-
 ![Shell Script](https://img.shields.io/badge/Bash-Script-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
-![Status](https://img.shields.io/badge/status-active-brightgreen)
-![Made with ❤️](https://img.shields.io/badge/made%20with-%E2%9D%A4-red)
+
 
 **VARS** (Vulnerability Automated Recon Suite) é um script Bash poderoso e automatizado para **varredura de vulnerabilidades web**, combinando as melhores ferramentas do ecossistema de bug bounty, pentest e red teaming.
 
@@ -89,7 +86,6 @@ chmod +x vars.sh
 - Go instalado (`sudo apt install golang`)
 - Python3 + pip3
 - Linux com permissão de escrita em `/tmp`
-- Conexão ativa com a internet
 
 ---
 
