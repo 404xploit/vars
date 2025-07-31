@@ -7,7 +7,7 @@
 
 ---
 
-## 🚀 Funcionalidades
+##  Funcionalidades
 
 - ✅ Escaneia URLs individuais ou arquivos com listas de domínios
 - ✅ Detecta automaticamente:
@@ -15,15 +15,15 @@
   - SQL Injection (SQLi)
   - Server-Side Template Injection (SSTI)
   - Log4Shell (CVE-2021-44228)
-- 🔍 Coleta de parâmetros ocultos com ParamSpider
-- 📂 Resultados organizados em diretórios por categoria (xss, sqli, etc.)
-- 🔁 Totalmente automatizado e fácil de usar
-- ☠️ Integração com ferramentas líderes do mercado (Nuclei, Jaeles, Knoxss, XSStrike, Dalfox, Xray, etc.)
-- 🔌 Suporte a proxy HTTP para redirecionamento via Burp/ZAP
+-  Coleta de parâmetros ocultos com ParamSpider
+-  Resultados organizados em diretórios por categoria (xss, sqli, etc.)
+-  Totalmente automatizado e fácil de usar
+-  Integração com ferramentas líderes do mercado (Nuclei, Jaeles, Knoxss, XSStrike, Dalfox, Xray, etc.)
+-  Suporte a proxy HTTP para redirecionamento via Burp/ZAP
 
 ---
 
-## 🧰 Ferramentas utilizadas
+##  Ferramentas utilizadas
 
 O VARS integra e automatiza o uso de diversas ferramentas de segurança:
 
@@ -43,7 +43,7 @@ O VARS integra e automatiza o uso de diversas ferramentas de segurança:
 
 ---
 
-## 🛠️ Instalação
+##  Instalação
 
 Para instalar todas as dependências necessárias, execute:
 
@@ -54,7 +54,7 @@ chmod +x vars.sh
 
 ---
 
-## ⚙️ Uso
+##  Uso
 
 ```bash
 ./vars.sh [opções]
@@ -81,7 +81,7 @@ chmod +x vars.sh
 
 ---
 
-## 🧠 Requisitos
+##  Requisitos
 
 - Go instalado (`sudo apt install golang`)
 - Python3 + pip3
@@ -89,7 +89,7 @@ chmod +x vars.sh
 
 ---
 
-## 📁 Estrutura dos Resultados
+##  Estrutura dos Resultados
 
 ```
 url_vuln_scan_results/
@@ -101,7 +101,7 @@ url_vuln_scan_results/
 
 ---
 
-## 📊 Metodologia
+##  Metodologia
 
 Abaixo está o diagrama da metodologia do script, representado em Mermaid, ilustrando o fluxo de execução desde a entrada até a geração dos resultados:
 
@@ -167,7 +167,7 @@ flowchart TD
     class Escaneamentos subgraphStyle
 ```
 
-## 🤝 Contribuição
+##  Contribuição
 
 Pull Requests e sugestões são bem-vindas! Abra uma issue ou envie seu PR.
 
