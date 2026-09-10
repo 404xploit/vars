@@ -1,594 +1,375 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+IFS=$'\n\t'
 
-echo "                                                                              "
-echo "                                                                              "
-echo "vvvvvvv           vvvvvvvaaaaaaaaaaaaa  rrrrr   rrrrrrrrr       ssssssssss   "
-echo " v:::::v         v:::::v a::::::::::::a r::::rrr:::::::::r    ss::::::::::s  "
-echo "  v:::::v       v:::::v  aaaaaaaaa:::::ar:::::::::::::::::r ss:::::::::::::s "
-echo "   v:::::v     v:::::v            a::::arr::::::rrrrr::::::rs::::::ssss:::::s"
-echo "    v:::::v   v:::::v      aaaaaaa:::::a r:::::r     r:::::r s:::::s  ssssss "
-echo "     v:::::v v:::::v     aa::::::::::::a r:::::r     rrrrrrr   s::::::s      "
-echo "      v:::::v:::::v     a::::aaaa::::::a r:::::r                  s::::::s   "
-echo "       v:::::::::v     a::::a    a:::::a r:::::r            ssssss   s:::::s "
-echo "        v:::::::v      a::::a    a:::::a r:::::r            s:::::ssss::::::s"
-echo "         v:::::v       a:::::aaaa::::::a r:::::r            s::::::::::::::s "
-echo "          v:::v         a::::::::::aa:::ar:::::r             s:::::::::::ss  "
-echo "           vvv           aaaaaaaaaa  aaaarrrrrrr              sssssssssss    "
-echo "                                                                              "
-echo "feito por 0x404xploit"
-
-echo "Iniciando Vulnerability Assessment and Recon Script..."
-
-# Função para exibir ajuda
-show_help() {
-    echo ""
-    echo "Uso: $0 [opções]"
-    echo ""
-    echo "Opções disponíveis:"
-    echo "  -u <target_url>   Escaneia uma única URL (ex.: https://testphp.vulnweb.com)"
-    echo "  -f <input_file>   Escaneia múltiplas URLs a partir de um arquivo (uma por linha)"
-    echo "  -i                Instala todas as dependências necessárias para o funcionamento do script"
-    echo "  -o <output_dir>   Define o diretório de saída para os resultados (padrão: url_vuln_scan_results)"
-    echo "  -p <proxy>        Define um proxy para as ferramentas (ex.: http://127.0.0.1:8080)"
-    echo "  -h                Exibe esta mensagem de ajuda"
-    echo ""
-    echo "Exemplos de uso:"
-    echo "  $0 -u https://testphp.vulnweb.com -o results"
-    echo "  $0 -f urls.txt -o results -p http://127.0.0.1:8080"
-    echo "  $0 -i"
-    echo ""
-    exit 0
-}
-
-OUTPUT_DIR="url_vuln_scan_results"
+VERSION="2.0.0"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+OUTPUT_DIR="vars_results"
+TARGET_URL=""
+INPUT_FILE=""
 PROXY=""
-KNOXSS_API_KEY="APIDOKNOXSS" # Substitua pelo seu Knoxss API key
-JAELES_SIGNATURES="/jaeles-signatures"
-NUCLEI_TEMPLATES="/root/nuclei-templates"
-PARAMSPIDER="/root/tools/paramspider/paramspider.py"
-XSSTRIKE="/root/tools/xsstrike/xsstrike.py"
-LOG4J_SCAN="/root/tools/log4j-scan/log4j-scan.py"
+MODE="full"
+JOBS="5"
+TIMEOUT="15"
+KNOXSS_API_KEY="${KNOXSS_API_KEY:-}"
+KEEP_GOING=0
+TMP_DIR=""
 
-# Função para checar e instalar dependências
-install_deps() {
-    echo "Verificando e instalando dependências..."
+# User-overridable paths. Nothing is hard-coded to /root anymore.
+TOOLS_DIR="${VARS_TOOLS_DIR:-${HOME}/.local/share/vars/tools}"
+BIN_DIR="${VARS_BIN_DIR:-${HOME}/.local/bin}"
+JAELES_SIGNATURES="${VARS_JAELES_SIGNATURES:-${TOOLS_DIR}/jaeles-signatures}"
+NUCLEI_TEMPLATES="${VARS_NUCLEI_TEMPLATES:-${TOOLS_DIR}/nuclei-templates}"
+PARAMSPIDER="${VARS_PARAMSPIDER:-${TOOLS_DIR}/ParamSpider/paramspider.py}"
+XSSTRIKE="${VARS_XSSTRIKE:-${TOOLS_DIR}/XSStrike/xsstrike.py}"
+LOG4J_SCAN="${VARS_LOG4J_SCAN:-${TOOLS_DIR}/log4j-scan/log4j-scan.py}"
 
-    # Verificar go e python3-pip
-    if ! command -v go >/dev/null 2>&1; then
-        echo "[ERRO] Go não está instalado. Instale com: sudo apt install golang"
-        exit 1
-    fi
-    echo " Go encontrado: $(go version)"
+log()  { printf '[%s] %s\n' "INFO" "$*"; }
+warn() { printf '[%s] %s\n' "WARN" "$*" >&2; }
+die()  { printf '[%s] %s\n' "ERROR" "$*" >&2; exit 1; }
 
-    if ! command -v pip3 >/dev/null 2>&1; then
-        echo "[ERRO] python3-pip não está instalado. Instale com: sudo apt install python3-pip"
-        exit 1
-    fi
-    echo " pip3 encontrado: $(pip3 --version)"
-
-    # Verificar se /tmp é gravável
-    if ! [ -w /tmp ]; then
-        echo "[ERRO] Diretório /tmp não é gravável. Corrija permissões: sudo chmod 1777 /tmp"
-        exit 1
-    fi
-    echo " /tmp é gravável"
-
-    # Pacotes do sistema
-    local sys_deps=("curl" "jq" "grep" "awk" "sed" "xargs" "unzip")
-    for dep in "${sys_deps[@]}"; do
-        if ! command -v "$dep" >/dev/null 2>&1; then
-            echo " Instalando $dep..."
-            sudo apt update && sudo apt install -y "$dep" || echo "[ERRO] Falha ao instalar $dep"
-        else
-            echo " $dep já está instalado"
-        fi
-    done
-
-    # Ferramentas baseadas em Go
-    local go_deps=(
-        "httpx:github.com/projectdiscovery/httpx/cmd/httpx@latest"
-        "gau:github.com/lc/gau/v2/cmd/gau@latest"
-        "uro:github.com/s0md3v/uro@latest"
-        "gf:github.com/tomnomnom/gf@latest"
-        "nuclei:github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest"
-        "airixss:github.com/ferreiraklet/airixss@latest"
-        "freq:github.com/emadshanab/Freq@latest"
-        "dalfox:github.com/hahwul/dalfox@latest"
-        "kxss:github.com/tomnomnom/hacks/kxss@latest"
-    )
-    for dep in "${go_deps[@]}"; do
-        local name="${dep%%:*}"
-        local repo="${dep#*:}"
-        if ! command -v "$name" >/dev/null 2>&1; then
-            echo " Instalando $name..."
-            go install "$repo" || echo "[AVISO] Falha ao instalar $name. Tente manualmente: go install $repo"
-            if [ -f "/root/go/bin/$name" ]; then
-                sudo mv "/root/go/bin/$name" /usr/local/bin/ || echo "[ERRO] Falha ao mover $name para /usr/local/bin"
-            else
-                echo "[AVISO] Binário de $name não encontrado em /root/go/bin. Verifique o ambiente Go."
-            fi
-        else
-            echo " $name já está instalado"
-        fi
-    done
-
-    # xray
-    if ! command -v xray >/dev/null 2>&1; then
-        echo " Instalando xray..."
-        LATEST_XRAY=$(curl -s https://api.github.com/repos/chaitin/xray/releases/latest | jq -r '.assets[] | select(.name | contains("linux_amd64")) | .browser_download_url')
-        if [ -n "$LATEST_XRAY" ]; then
-            curl -L "$LATEST_XRAY" -o /tmp/xray.zip || echo "[ERRO] Falha ao baixar xray"
-            unzip /tmp/xray.zip -d /tmp/xray || echo "[ERRO] Falha ao descompactar xray"
-            sudo mv /tmp/xray/xray /usr/local/bin/ || echo "[ERRO] Falha ao mover xray para /usr/local/bin"
-            rm -rf /tmp/xray /tmp/xray.zip
-        else
-            echo "[AVISO] Falha ao buscar binário do xray. Instale manualmente: https://github.com/chaitin/xray/releases"
-        fi
-    else
-        echo " xray já está instalado"
-    fi
-
-    # bhedak
-    if ! command -v bhedak >/dev/null 2>&1; then
-        echo " Instalando bhedak..."
-        git clone https://github.com/R0X4R/bhedak.git /tmp/bhedak || { echo "[ERRO] Falha ao clonar bhedak"; exit 1; }
-        cd /tmp/bhedak
-        go mod init github.com/R0X4R/bhedak || echo "[AVISO] go mod init falhou, tentando compilar mesmo assim"
-        go build -o bhedak . || { echo "[ERRO] Falha ao compilar bhedak"; exit 1; }
-        sudo mv bhedak /usr/local/bin/ || echo "[ERRO] Falha ao mover bhedak para /usr/local/bin"
-        cd - >/dev/null
-        rm -rf /tmp/bhedak
-    else
-        echo " bhedak já está instalado"
-    fi
-
-    # sqlmap
-    if ! command -v sqlmap >/dev/null 2>&1; then
-        echo " Instalando sqlmap..."
-        git clone https://github.com/sqlmapproject/sqlmap.git /tmp/sqlmap || echo "[ERRO] Falha ao clonar sqlmap"
-        sudo ln -s /tmp/sqlmap/sqlmap.py /usr/local/bin/sqlmap || echo "[ERRO] Falha ao criar link para sqlmap"
-    else
-        echo " sqlmap já está instalado"
-    fi
-
-    # jaeles
-    if ! command -v jaeles >/dev/null 2>&1; then
-        echo " Instalando jaeles..."
-        git clone https://github.com/jaeles-project/jaeles.git /tmp/jaeles || echo "[ERRO] Falha ao clonar jaeles"
-        cd /tmp/jaeles && go build && sudo mv jaeles /usr/local/bin/ || echo "[ERRO] Falha ao compilar ou mover jaeles"
-        sudo mkdir -p "$JAELES_SIGNATURES"
-        git clone https://github.com/jaeles-project/jaeles-signatures.git "$JAELES_SIGNATURES" || echo "[ERRO] Falha ao clonar assinaturas do jaeles"
-        rm -rf /tmp/jaeles
-    else
-        echo " jaeles já está instalado"
-    fi
-
-    # Paramspider
-    if ! [ -f "$PARAMSPIDER" ]; then
-        echo " Instalando paramspider..."
-        git clone https://github.com/devanshbatham/ParamSpider.git /root/tools/paramspider || echo "[ERRO] Falha ao clonar paramspider"
-        sudo ln -s "$PARAMSPIDER" /usr/local/bin/paramspider || echo "[ERRO] Falha ao criar link para paramspider"
-        sudo chmod +x "$PARAMSPIDER"
-    else
-        echo " paramspider já está instalado em $PARAMSPIDER"
-    fi
-
-    # xsstrike
-    if ! [ -f "$XSSTRIKE" ]; then
-        echo " Instalando xsstrike..."
-        git clone https://github.com/s0md3v/XSStrike.git /root/tools/xsstrike || echo "[ERRO] Falha ao clonar xsstrike"
-        pip3 install -r /root/tools/xsstrike/requirements.txt || echo "[ERRO] Falha ao instalar dependências do xsstrike"
-        sudo ln -s "$XSSTRIKE" /usr/local/bin/xsstrike || echo "[ERRO] Falha ao criar link para xsstrike"
-    else
-        echo " xsstrike já está instalado em $XSSTRIKE"
-    fi
-
-    # log4j-scan
-    if ! [ -f "$LOG4J_SCAN" ]; then
-        echo " Instalando log4j-scan..."
-        git clone https://github.com/fullhunt/log4j-scan.git /root/tools/log4j-scan || echo "[ERRO] Falha ao clonar log4j-scan"
-        pip3 install -r /root/tools/log4j-scan/requirements.txt || echo "[ERRO] Falha ao instalar dependências do log4j-scan"
-        sudo ln -s "$LOG4J_SCAN" /usr/local/bin/log4j-scan || echo "[ERRO] Falha ao criar link para log4j-scan"
-    else
-        echo " log4j-scan já está instalado em $LOG4J_SCAN"
-    fi
-
-    # Nuclei templates
-    if ! [ -d "$NUCLEI_TEMPLATES" ]; then
-        echo " Instalando templates do nuclei..."
-        sudo mkdir -p "$NUCLEI_TEMPLATES"
-        git clone https://github.com/projectdiscovery/nuclei-templates.git "$NUCLEI_TEMPLATES" || echo "[ERRO] Falha ao clonar templates do nuclei"
-    else
-        echo " Templates do nuclei já estão instalados em $NUCLEI_TEMPLATES"
-    fi
-
-    echo " Instalação de dependências concluída. Configure KNOXSS_API_KEY no script."
-}
-
-# Função para verificar dependências
-check_deps() {
-    echo " Verificando dependências..."
-    local deps=("curl" "jq" "httpx" "gau" "uro" "gf" "xargs" "grep" "awk" "sed" "xray" "bhedak" "airixss" "freq" "dalfox" "sqlmap" "jaeles" "nuclei" "kxss" "paramspider" "xsstrike" "log4j-scan")
-    for dep in "${deps[@]}"; do
-        if ! command -v "$dep" >/dev/null 2>&1; then
-            echo "[ERRO] $dep não está instalado ou não está no PATH. Execute com -i para instalar dependências."
-            exit 1
-        fi
-        echo " $dep encontrado"
-    done
-    if ! [ -d "$JAELES_SIGNATURES" ]; then
-        echo "[ERRO] Assinaturas do jaeles não encontradas em $JAELES_SIGNATURES. Execute com -i para instalar."
-        exit 1
-    fi
-    if ! [ -d "$NUCLEI_TEMPLATES" ]; then
-        echo "[ERRO] Templates do nuclei não encontrados em $NUCLEI_TEMPLATES. Execute com -i para instalar."
-        exit 1
+cleanup() {
+    if [[ -n "${TMP_DIR:-}" && -d "$TMP_DIR" ]]; then
+        rm -rf -- "$TMP_DIR"
     fi
 }
+trap cleanup EXIT
+trap 'die "Unexpected error at line $LINENO"' ERR
 
-# Função para criar estrutura de diretórios de saída
-setup_output() {
-    echo " Configurando diretório de saída: $OUTPUT_DIR"
-    mkdir -p "$OUTPUT_DIR" "$OUTPUT_DIR/xss" "$OUTPUT_DIR/sqli" "$OUTPUT_DIR/log4j" "$OUTPUT_DIR/misc" || { echo "[ERRO] Falha ao criar diretórios"; exit 1; }
+usage() {
+    cat <<EOF
+VARS ${VERSION} - Vulnerability Assessment and Recon Suite
+
+Uso:
+  $0 -u <url> [opções]
+  $0 -f <arquivo> [opções]
+
+Opções:
+  -u <url>       URL única
+  -f <arquivo>   Arquivo com URLs, uma por linha
+  -o <dir>       Diretório de saída (padrão: vars_results)
+  -m <modo>      full|recon|xss|sqli|nuclei|log4j (padrão: full)
+  -j <jobs>      Concorrência máxima do pipeline (padrão: 5)
+  -t <seg>       Timeout por ferramenta quando suportado (padrão: 15)
+  -p <proxy>     Proxy HTTP/HTTPS
+  -k <chave>     Chave Knoxss (preferível: KNOXSS_API_KEY)
+  --keep-going   Continua mesmo quando um módulo falha
+  -h             Ajuda
+  -v             Versão
+
+Exemplos:
+  $0 -u https://example.com -m xss
+  $0 -f targets.txt -m recon -o results
+  KNOXSS_API_KEY=... $0 -f targets.txt -m full
+
+Use somente em ativos próprios ou explicitamente autorizados.
+EOF
 }
 
-# Função: Escaneamento Xray
-xray_scan() {
-    local input="$1"
-    local output="$OUTPUT_DIR/xss/xray_vuln.html"
-    echo " Executando escaneamento Xray em $input"
-    if [ -z "$input" ]; then
-        echo "[ERRO] Entrada vazia para xray_scan"
-        return 1
-    fi
-    if [ -f "$input" ]; then
-        xargs -a "$input" -I@ sh -c "xray webscan --plugins cmd-injection,sqldet,xss --url \"@\" --html-output \"$output\" || true"
-    else
-        echo "$input" | xargs -I@ sh -c "xray webscan --plugins cmd-injection,sqldet,xss --url \"@\" --html-output \"$output\" || true"
-    fi
+version() { printf 'VARS %s\n' "$VERSION"; }
+
+require_cmd() {
+    command -v "$1" >/dev/null 2>&1 || die "Dependência ausente: $1"
 }
 
-# Função: Escaneamento Knoxss XSS
-knoxss_scan() {
-    local input="$1"
-    local output="$OUTPUT_DIR/xss/knoxss_results.txt"
-    echo " Executando escaneamento Knoxss XSS em $input"
-    if [ -z "$input" ]; then
-        echo "[ERRO] Entrada vazia para knoxss_scan"
-        return 1
-    fi
-    if [ "$KNOXSS_API_KEY" = "APIDOKNOXSS" ]; then
-        echo "[ERRO] KNOXSS_API_KEY não configurada. Defina no script."
-        return 1
-    fi
-    if [ -f "$input" ]; then
-        cat "$input" | grep "=" | uro | gf xss | awk "{ print \"curl https://knoxss.me/api/v3 -d \\\"target=\\\"\$1\\\"\\\" -H \\\"X-API-KEY: $KNOXSS_API_KEY\\\"\"}" | sh > "$output" || echo "[ERRO] Falha no escaneamento Knoxss"
-    else
-        echo "$input" | grep "=" | uro | gf xss | awk "{ print \"curl https://knoxss.me/api/v3 -d \\\"target=\\\"\$1\\\"\\\" -H \\\"X-API-KEY: $KNOXSS_API_KEY\\\"\"}" | sh > "$output" || echo "[ERRO] Falha no escaneamento Knoxss"
-    fi
-}
+check_runtime() {
+    require_cmd awk
+    require_cmd grep
+    require_cmd sed
+    require_cmd sort
+    require_cmd mktemp
+    require_cmd xargs
+    require_cmd curl
+    require_cmd git
 
-# Função: Escaneamento Log4j
-log4j_scan() {
-    local input="$1"
-    local output="$OUTPUT_DIR/log4j/log4j_results.txt"
-    echo " Executando escaneamento Log4j em $input"
-    if [ -z "$input" ]; then
-        echo "[ERRO] Entrada vazia para log4j_scan"
-        return 1
-    fi
-    if [ -f "$input" ]; then
-        cat "$input" | httpx -silent | xargs -I@ sh -c "log4j-scan -u \"@\" || true" > "$output" 2>&1
-    else
-        echo "$input" | httpx -silent | xargs -I@ sh -c "log4j-scan -u \"@\" || true" > "$output" 2>&1
-    fi
-}
+    [[ "$JOBS" =~ ^[1-9][0-9]*$ ]] || die "-j deve ser um inteiro positivo"
+    [[ "$TIMEOUT" =~ ^[1-9][0-9]*$ ]] || die "-t deve ser um inteiro positivo"
+    [[ -z "$TARGET_URL" || -z "$INPUT_FILE" ]] || die "Use -u ou -f, não ambos"
+    [[ -n "$TARGET_URL" || -n "$INPUT_FILE" ]] || die "Forneça -u ou -f"
+    [[ -z "$INPUT_FILE" || -f "$INPUT_FILE" ]] || die "Arquivo não encontrado: $INPUT_FILE"
 
-# Função: Escaneamento urldedupe + bhedak XSS
-bhedak_urldedupe_scan() {
-    local input="$1"
-    local output="$OUTPUT_DIR/xss/bhedak_urldedupe_results.txt"
-    echo " Executando escaneamento bhedak com urldedupe XSS em $input"
-    if [ -z "$input" ]; then
-        echo "[ERRO] Entrada vazia para bhedak_urldedupe_scan"
-        return 1
-    fi
-    if [ -f "$input" ]; then
-        cat "$input" | urldedupe -qs | bhedak '"><svg onload=confirm(1)>' | airixss -payload "confirm(1)" | egrep -v 'Not' > "$output" || echo "[ERRO] Falha no escaneamento bhedak_urldedupe"
-    else
-        echo "$input" | urldedupe -qs | bhedak '"><svg onload=confirm(1)>' | airixss -payload "confirm(1)" | egrep -v 'Not' > "$output" || echo "[ERRO] Falha no escaneamento bhedak_urldedupe"
-    fi
-}
-
-# Função: Escaneamento Hakrawler + airixss XSS
-hakrawler_airixss_scan() {
-    local input="$1"
-    local output="$OUTPUT_DIR/xss/hakrawler_airixss_results.txt"
-    echo " Executando escaneamento hakrawler + airixss XSS em $input"
-    if [ -z "$input" ]; then
-        echo "[ERRO] Entrada vazia para hakrawler_airixss_scan"
-        return 1
-    fi
-    if [ -f "$input" ]; then
-        cat "$input" | httpx -silent | hakrawler -subs | grep "=" | qsreplace '"><svg onload=confirm(1)>' | airixss -payload "confirm(1)" | egrep -v 'Not' > "$output" || echo "[ERRO] Falha no escaneamento hakrawler_airixss"
-    else
-        echo "$input" | httpx -silent | hakrawler -subs | grep "=" | qsreplace '"><svg onload=confirm(1)>' | airixss -payload "confirm(1)" | egrep -v 'Not' > "$output" || echo "[ERRO] Falha no escaneamento hakrawler_airixss"
-    fi
-}
-
-# Função: Escaneamento Airixss XSS
-airixss_scan() {
-    local input="$1"
-    local output="$OUTPUT_DIR/xss/airixss_results.txt"
-    echo " Executando escaneamento airixss XSS em $input"
-    if [ -z "$input" ]; then
-        echo "[ERRO] Entrada vazia para airixss_scan"
-        return 1
-    fi
-    if [ -f "$input" ]; then
-        cat "$input" | gf xss | uro | httpx -silent | qsreplace '"><svg onload=confirm(1)>' | airixss -payload "confirm(1)" > "$output" || echo "[ERRO] Falha no escaneamento airixss"
-    else
-        echo "$input" | gf xss | uro | httpx -silent | qsreplace '"><svg onload=confirm(1)>' | airixss -payload "confirm(1)" > "$output" || echo "[ERRO] Falha no escaneamento airixss"
-    fi
-}
-
-# Função: Escaneamento Freq XSS
-freq_xss_scan() {
-    local input="$1"
-    local output="$OUTPUT_DIR/xss/freq_xss_results.txt"
-    echo " Executando escaneamento freq XSS em $input"
-    if [ -z "$input" ]; then
-        echo "[ERRO] Entrada vazia para freq_xss_scan"
-        return 1
-    fi
-    if [ -f "$input" ]; then
-        cat "$input" | gf xss | uro | qsreplace '"><img src=x onerror=alert(1);>' | freq | egrep -v 'Not' > "$output" || echo "[ERRO] Falha no escaneamento freq"
-    else
-        echo "$input" | gf xss | uro | qsreplace '"><img src=x onerror=alert(1);>' | freq | egrep -v 'Not' > "$output" || echo "[ERRO] Falha no escaneamento freq"
-    fi
-}
-
-# Função: Escaneamento Bhedak XSS e SSTI
-bhedak_scan() {
-    local input="$1"
-    local output="$OUTPUT_DIR/xss/bhedak_results.txt"
-    echo " Executando escaneamento bhedak XSS e SSTI em $input"
-    if [ -z "$input" ]; then
-        echo "[ERRO] Entrada vazia para bhedak_scan"
-        return 1
-    fi
-    if [ -f "$input" ]; then
-        cat "$input" | bhedak "\"><svg/onload=alert(1)>*'/---+{{7*7}}" > "$output" || echo "[ERRO] Falha no escaneamento bhedak"
-    else
-        echo "$input" | bhedak "\"><svg/onload=alert(1)>*'/---+{{7*7}}" > "$output" || echo "[ERRO] Falha no escaneamento bhedak"
-    fi
-}
-
-# Função: Escaneamento Dalfox (xsstrike)
-dalfox_xsstrike_scan() {
-    local input="$1"
-    local output="$OUTPUT_DIR/xss/dalfox_xsstrike_results.txt"
-    echo " Executando escaneamento dalfox (xsstrike) em $input"
-    if [ -z "$input" ]; then
-        echo "[ERRO] Entrada vazia para dalfox_xsstrike_scan"
-        return 1
-    fi
-    if [ -f "$input" ]; then
-        xargs -a "$input" -I@ bash -c "xsstrike -u @ --fuzzer || true" > "$output" 2>&1
-    else
-        echo "$input" | xargs -I@ bash -c "xsstrike -u @ --fuzzer || true" > "$output" 2>&1
-    fi
-}
-
-# Função: Escaneamento Dalfox URL
-dalfox_url_scan() {
-    local input="$1"
-    local output="$OUTPUT_DIR/xss/dalfox_url_results.txt"
-    echo " Executando escaneamento dalfox URL em $input"
-    if [ -z "$input" ]; then
-        echo "[ERRO] Entrada vazia para dalfox_url_scan"
-        return 1
-    fi
-    if [ -f "$input" ]; then
-        cat "$input" | anew | httpx -silent -threads 500 | xargs -I@ dalfox url @ > "$output" 2>&1 || echo "[ERRO] Falha no escaneamento dalfox"
-    else
-        echo "$input" | httpx -silent -threads 500 | xargs -I@ dalfox url @ > "$output" 2>&1 || echo "[ERRO] Falha no escaneamento dalfox"
-    fi
-}
-
-# Função: Escaneamento de parâmetros com chaos
-chaos_param_scan() {
-    local input="$1"
-    local output="$OUTPUT_DIR/misc/chaos_param_results.txt"
-    echo " Executando escaneamento de parâmetros com chaos em $input"
-    if [ -z "$input" ]; then
-        echo "[ERRO] Entrada vazia para chaos_param_scan"
-        return 1
-    fi
-    local domains
-    if [ -f "$input" ]; then
-        domains=$(cat "$input" | awk -F/ '{print $3}' | sort -u | grep -E '^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
-    else
-        domains=$(echo "$input" | awk -F/ '{print $3}' | sort -u | grep -E '^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
-    fi
-    if [ -z "$domains" ]; then
-        echo "[ERRO] Nenhum domínio válido extraído de $input"
-        return 1
-    fi
-    echo "$domains" | xargs -I@ sh -c "paramspider -d @ --quiet || echo '[ERRO] Falha no paramspider para @'" > "$output" 2>&1
-}
-
-
-# Função: Escaneamento Kxss XSS
-kxss_scan() {
-    local input="$1"
-    local output="$OUTPUT_DIR/xss/kxss_results.txt"
-    echo " Executando escaneamento kxss XSS em $input"
-    if [ -z "$input" ]; then
-        echo "[ERRO] Entrada vazia para kxss_scan"
-        return 1
-    fi
-    if [ -f "$input" ]; then
-        cat "$input" | kxss > "$output" || echo "[ERRO] Falha no escaneamento kxss"
-    else
-        echo "$input" | kxss > "$output" || echo "[ERRO] Falha no escaneamento kxss"
-    fi
-}
-
-# Função: Escaneamento SQLi massivo
-sqli_mass_scan() {
-    local input="$1"
-    local output="$OUTPUT_DIR/sqli/sqli_results.txt"
-    echo " Executando escaneamento SQLi massivo em $input"
-    if [ -z "$input" ]; then
-        echo "[ERRO] Entrada vazia para sqli_mass_scan"
-        return 1
-    fi
-    if [ -f "$input" ]; then
-        cat "$input" | httpx -silent | anew | gf sqli > sqli_temp.txt && sqlmap -m sqli_temp.txt --batch --random-agent --level 1 > "$output" 2>&1 || echo "[ERRO] Falha no escaneamento SQLi massivo"
-        rm -f sqli_temp.txt
-    else
-        echo "$input" | httpx -silent | anew | gf sqli > sqli_temp.txt && sqlmap -m sqli_temp.txt --batch --random-agent --level 1 > "$output" 2>&1 || echo "[ERRO] Falha no escaneamento SQLi massivo"
-        rm -f sqli_temp.txt
-    fi
-}
-
-# Função: Escaneamento SQLi com qsreplace
-sqli_qsreplace_scan() {
-    local input="$1"
-    local output="$OUTPUT_DIR/sqli/sqli_qsreplace_results.txt"
-    echo " Executando escaneamento SQLi com qsreplace em $input"
-    if [ -z "$input" ]; then
-        echo "[ERRO] Entrada vazia para sqli_qsreplace_scan"
-        return 1
-    fi
-    if [ -f "$input" ]; then
-        cat "$input" | grep "=" | qsreplace "' OR '1" | httpx -silent -store-response-dir "$OUTPUT_DIR/sqli/output" -threads 100 | grep -q -rn "syntax\|mysql" "$OUTPUT_DIR/sqli/output" 2>/dev/null && printf "TARGET \033[0;32mPode ser Explorável\e[m\n" || printf "TARGET \033[0;31mNão Vulnerável\e[m\n" > "$output" || echo "[ERRO] Falha no escaneamento SQLi qsreplace"
-    else
-        echo "$input" | grep "=" | qsreplace "' OR '1" | httpx -silent -store-response-dir "$OUTPUT_DIR/sqli/output" -threads 100 | grep -q -rn "syntax\|mysql" "$OUTPUT_DIR/sqli/output" 2>/dev/null && printf "TARGET \033[0;32mPode ser Explorável\e[m\n" || printf "TARGET \033[0;31mNão Vulnerável\e[m\n" > "$output" || echo "[ERRO] Falha no escaneamento SQLi qsreplace"
-    fi
-}
-
-# Função: Escaneamento SQLi URL
-sqli_url_scan() {
-    local input="$1"
-    local output="$OUTPUT_DIR/sqli/sqli_url_results.txt"
-    echo " Executando escaneamento SQLi URL em $input"
-    if [ -z "$input" ]; then
-        echo "[ERRO] Entrada vazia para sqli_url_scan"
-        return 1
-    fi
-    if [ -f "$input" ]; then
-        cat "$input" | httpx -silent | anew | gf sqli > sqli_temp.txt && sqlmap -m sqli_temp.txt --batch --random-agent --level 1 > "$output" 2>&1 || echo "[ERRO] Falha no escaneamento SQLi URL"
-        rm -f sqli_temp.txt
-    else
-        echo "$input" | httpx -silent | anew | gf sqli > sqli_temp.txt && sqlmap -m sqli_temp.txt --batch --random-agent --level 1 > "$output" 2>&1 || echo "[ERRO] Falha no escaneamento SQLi URL"
-        rm -f sqli_temp.txt
-    fi
-}
-
-# Função: Escaneamento Nuclei
-nuclei_scan() {
-    local input="$1"
-    local output="$OUTPUT_DIR/misc/nuclei_results.txt"
-    echo " Executando escaneamento nuclei em $input"
-    if [ -z "$input" ]; then
-        echo "[ERRO] Entrada vazia para nuclei_scan"
-        return 1
-    fi
-    if [ -f "$input" ]; then
-        cat "$input" | httpx -silent -threads 1000 | nuclei -t "$NUCLEI_TEMPLATES" -o "$output" || echo "[ERRO] Falha no escaneamento nuclei"
-    else
-        echo "$input" | httpx -silent -threads 1000 | nuclei -t "$NUCLEI_TEMPLATES" -o "$output" || echo "[ERRO] Falha no escaneamento nuclei"
-    fi
-}
-
-# Função: Escaneamento Jaeles URL
-jaeles_url_scan() {
-    local input="$1"
-    local output="$OUTPUT_DIR/misc/jaeles_url_results.txt"
-    echo " Executando escaneamento jaeles URL em $input"
-    if [ -z "$input" ]; then
-        echo "[ERRO] Entrada vazia para jaeles_url_scan"
-        return 1
-    fi
-    if [ -f "$input" ]; then
-        cat "$input" | anew | httpx -silent -threads 500 | xargs -I@ jaeles scan -s "$JAELES_SIGNATURES" -u @ > "$output" 2>&1 || echo "[ERRO] Falha no escaneamento jaeles"
-    else
-        echo "$input" | httpx -silent -threads 500 | xargs -I@ jaeles scan -s "$JAELES_SIGNATURES" -u @ > "$output" 2>&1 || echo "[ERRO] Falha no escaneamento jaeles"
-    fi
-}
-
-# Parsear argumentos
-echo " Parseando argumentos..."
-while getopts "u:f:o:p:ih" opt; do
-    case $opt in
-        u) TARGET_URL="$OPTARG" ;;
-        f) INPUT_FILE="$OPTARG" ;;
-        o) OUTPUT_DIR="$OPTARG" ;;
-        p) PROXY="$OPTARG" ;;
-        i) INSTALL_DEPS=1 ;;
-        h) show_help ;;
-        *) echo "[ERRO] Uso: $0 [-u target_url | -f input_file | -i | -h] [-o output_dir] [-p proxy]"; exit 1 ;;
+    case "$MODE" in
+        full|recon|xss|sqli|nuclei|log4j) ;;
+        *) die "Modo inválido: $MODE" ;;
     esac
-done
+}
 
-# Lidar com instalação de dependências
-if [ -n "$INSTALL_DEPS" ]; then
-    echo " Executando install_deps..."
-    install_deps
-    exit 0
-fi
+normalize_targets() {
+    local input="$1"
+    local output="$2"
 
-# Validar entrada
-echo " Validando entrada..."
-if [ -z "$TARGET_URL" ] && [ -z "$INPUT_FILE" ]; then
-    echo "[ERRO] Forneça uma URL alvo (-u), arquivo de entrada (-f), use -i para instalar dependências ou -h para ajuda"
-    exit 1
-fi
-if [ -n "$INPUT_FILE" ] && [ ! -f "$INPUT_FILE" ]; then
-    echo "[ERRO] Arquivo de entrada $INPUT_FILE não existe"
-    exit 1
-fi
+    if [[ -f "$input" ]]; then
+        awk 'NF && $1 !~ /^#/ {print $1}' "$input" > "$output"
+    else
+        printf '%s\n' "$input" > "$output"
+    fi
 
-# Configurar proxy
-if [ -n "$PROXY" ]; then
-    echo " Configurando proxy: $PROXY"
+    # Only accept HTTP(S) URLs. This prevents accidental command/path interpretation.
+    awk '
+        /^https?:\/\// {
+            gsub(/[[:space:]]+$/, ""); print
+        }
+    ' "$output" | sort -u > "${output}.clean"
+    mv -- "${output}.clean" "$output"
+
+    [[ -s "$output" ]] || die "Nenhuma URL HTTP(S) válida encontrada"
+}
+
+setup_output() {
+    mkdir -p -- "$OUTPUT_DIR"/{recon,xss,sqli,log4j,nuclei,misc,meta}
+    TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vars.XXXXXX")"
+    printf 'VARS %s\n' "$VERSION" > "$OUTPUT_DIR/meta/run.txt"
+    printf 'started=%s\n' "$(date -Is)" >> "$OUTPUT_DIR/meta/run.txt"
+    printf 'mode=%s\n' "$MODE" >> "$OUTPUT_DIR/meta/run.txt"
+}
+
+configure_proxy() {
+    [[ -z "$PROXY" ]] && return 0
+    [[ "$PROXY" =~ ^https?:// ]] || die "Proxy deve usar http:// ou https://"
     export HTTP_PROXY="$PROXY"
     export HTTPS_PROXY="$PROXY"
-fi
+    export http_proxy="$PROXY"
+    export https_proxy="$PROXY"
+    log "Proxy configurado"
+}
 
-# Verificar dependências
-check_deps
+has_tool() { command -v "$1" >/dev/null 2>&1; }
 
-# Configurar diretório de saída
-setup_output
+check_tool() {
+    if ! has_tool "$1"; then
+        warn "Ferramenta não encontrada: $1 — módulo será ignorado"
+        return 1
+    fi
+    return 0
+}
 
-# Determinar entrada
-if [ -n "$INPUT_FILE" ]; then
-    INPUT="$INPUT_FILE"
-else
-    INPUT="$TARGET_URL"
-fi
-echo " Entrada definida: $INPUT"
+check_optional_tools() {
+    local tools=(httpx gau uro gf dalfox nuclei sqlmap jaeles xray kxss bhedak airixss freq hakrawler qsreplace anew paramspider xsstrike log4j-scan)
+    log "Inventário de ferramentas:"
+    local tool
+    for tool in "${tools[@]}"; do
+        if has_tool "$tool"; then
+            printf '  [+] %s\n' "$tool"
+        else
+            printf '  [-] %s\n' "$tool"
+        fi
+    done
+}
 
-# Executar escaneamentos
-xray_scan "$INPUT"
-knoxss_scan "$INPUT"
-log4j_scan "$INPUT"
-bhedak_urldedupe_scan "$INPUT"
-hakrawler_airixss_scan "$INPUT"
-airixss_scan "$INPUT"
-freq_xss_scan "$INPUT"
-bhedak_scan "$INPUT"
-dalfox_xsstrike_scan "$INPUT"
-dalfox_url_scan "$INPUT"
-chaos_param_scan "$INPUT"
-kxss_scan "$INPUT"
-sqli_mass_scan "$INPUT"
-sqli_qsreplace_scan "$INPUT"
-sqli_url_scan "$INPUT"
-nuclei_scan "$INPUT"
-jaeles_url_scan "$INPUT"
+run_cmd() {
+    local name="$1"
+    shift
+    local logfile="$OUTPUT_DIR/meta/${name}.log"
+    log "Running: $name"
+    if "$@" >"$logfile" 2>&1; then
+        log "OK: $name"
+        return 0
+    fi
+    warn "Falhou: $name (log: $logfile)"
+    (( KEEP_GOING == 1 )) && return 0
+    return 1
+}
 
-echo " Todos os escaneamentos concluídos. Resultados salvos em $OUTPUT_DIR"
+run_pipeline() {
+    local name="$1"
+    local input="$2"
+    local output="$3"
+    shift 3
+
+    log "Module: $name"
+    if "$@" < "$input" > "$output" 2>&1; then
+        log "OK: $name"
+    else
+        warn "Falhou: $name (resultado: $output)"
+        (( KEEP_GOING == 1 )) || return 1
+    fi
+}
+
+recon_module() {
+    local targets="$1"
+    local live="$OUTPUT_DIR/recon/live.txt"
+    : > "$live"
+
+    if check_tool httpx; then
+        httpx -silent -l "$targets" -threads "$JOBS" > "$live" || {
+            warn "httpx falhou"
+            (( KEEP_GOING == 1 )) || return 1
+        }
+    else
+        cp -- "$targets" "$live"
+    fi
+
+    if check_tool gau; then
+        gau --threads "$JOBS" < "$live" > "$OUTPUT_DIR/recon/gau.txt" || true
+    fi
+
+    if check_tool uro && [[ -s "$OUTPUT_DIR/recon/gau.txt" ]]; then
+        uro < "$OUTPUT_DIR/recon/gau.txt" > "$OUTPUT_DIR/recon/urls.txt" || true
+    else
+        cp -- "$OUTPUT_DIR/recon/gau.txt" "$OUTPUT_DIR/recon/urls.txt" 2>/dev/null || true
+    fi
+
+    if check_tool hakrawler; then
+        hakrawler -subs < "$live" > "$OUTPUT_DIR/recon/crawl.txt" 2>&1 || true
+    fi
+
+    sort -u "$live" "$OUTPUT_DIR/recon/urls.txt" 2>/dev/null | grep -E '^https?://' > "$OUTPUT_DIR/recon/candidates.txt" || true
+    log "Recon concluído: $OUTPUT_DIR/recon"
+}
+
+xss_module() {
+    local targets="$1"
+    local input="$OUTPUT_DIR/recon/candidates.txt"
+    [[ -s "$input" ]] || input="$targets"
+
+    if check_tool kxss; then
+        kxss < "$input" > "$OUTPUT_DIR/xss/kxss.txt" 2>&1 || true
+    fi
+
+    if check_tool dalfox; then
+        dalfox file "$input" --skip-bav > "$OUTPUT_DIR/xss/dalfox.txt" 2>&1 || true
+    fi
+
+    if check_tool xsstrike && [[ -f "$XSSTRIKE" ]]; then
+        while IFS= read -r url; do
+            [[ -n "$url" ]] || continue
+            python3 "$XSSTRIKE" -u "$url" --fuzzer >> "$OUTPUT_DIR/xss/xsstrike.txt" 2>&1 || true
+        done < "$input"
+    fi
+
+    if check_tool nuclei; then
+        nuclei -l "$input" -tags xss -o "$OUTPUT_DIR/xss/nuclei-xss.txt" || true
+    fi
+}
+
+sqli_module() {
+    local targets="$1"
+    local input="$OUTPUT_DIR/recon/candidates.txt"
+    [[ -s "$input" ]] || input="$targets"
+
+    if check_tool gf && check_tool sqlmap; then
+        gf sqli < "$input" | sort -u > "$TMP_DIR/sqli.txt" || true
+        if [[ -s "$TMP_DIR/sqli.txt" ]]; then
+            sqlmap -m "$TMP_DIR/sqli.txt" --batch --level=1 --output-dir="$OUTPUT_DIR/sqli/sqlmap" > "$OUTPUT_DIR/sqli/sqlmap.log" 2>&1 || true
+        fi
+    fi
+
+    if check_tool nuclei; then
+        nuclei -l "$input" -tags sqli -o "$OUTPUT_DIR/sqli/nuclei-sqli.txt" || true
+    fi
+}
+
+log4j_module() {
+    local targets="$1"
+    if ! check_tool log4j-scan; then
+        [[ -f "$LOG4J_SCAN" ]] || return 0
+    fi
+
+    if [[ -f "$LOG4J_SCAN" ]]; then
+        while IFS= read -r url; do
+            [[ -n "$url" ]] || continue
+            python3 "$LOG4J_SCAN" -u "$url" >> "$OUTPUT_DIR/log4j/results.txt" 2>&1 || true
+        done < "$targets"
+    else
+        while IFS= read -r url; do
+            [[ -n "$url" ]] || continue
+            log4j-scan -u "$url" >> "$OUTPUT_DIR/log4j/results.txt" 2>&1 || true
+        done < "$targets"
+    fi
+}
+
+nuclei_module() {
+    local targets="$1"
+    check_tool nuclei || return 0
+    if [[ -d "$NUCLEI_TEMPLATES" ]]; then
+        nuclei -l "$targets" -t "$NUCLEI_TEMPLATES" -o "$OUTPUT_DIR/nuclei/results.txt" || true
+    else
+        nuclei -l "$targets" -o "$OUTPUT_DIR/nuclei/results.txt" || true
+    fi
+}
+
+knoxss_module() {
+    local input="$OUTPUT_DIR/recon/candidates.txt"
+    [[ -s "$input" ]] || input="$1"
+    [[ -n "$KNOXSS_API_KEY" ]] || {
+        warn "Knoxss ignorado: KNOXSS_API_KEY não configurada"
+        return 0
+    }
+    check_tool curl || return 0
+    : > "$OUTPUT_DIR/xss/knoxss.txt"
+    while IFS= read -r url; do
+        [[ -n "$url" ]] || continue
+        curl --fail --silent --show-error --max-time "$TIMEOUT" \
+            -X POST 'https://knoxss.me/api/v3' \
+            -H "X-API-KEY: $KNOXSS_API_KEY" \
+            --data-urlencode "target=$url" >> "$OUTPUT_DIR/xss/knoxss.txt" 2>&1 || true
+    done < "$input"
+}
+
+run_mode() {
+    local targets="$1"
+    case "$MODE" in
+        recon) recon_module "$targets" ;;
+        xss)
+            recon_module "$targets"
+            xss_module "$targets"
+            knoxss_module "$targets"
+            ;;
+        sqli)
+            recon_module "$targets"
+            sqli_module "$targets"
+            ;;
+        nuclei) nuclei_module "$targets" ;;
+        log4j) log4j_module "$targets" ;;
+        full)
+            recon_module "$targets"
+            xss_module "$targets"
+            knoxss_module "$targets"
+            sqli_module "$targets"
+            log4j_module "$targets"
+            nuclei_module "$targets"
+            ;;
+    esac
+}
+
+main() {
+    while (($#)); do
+        case "$1" in
+            -u) [[ $# -ge 2 ]] || die "-u requer uma URL"; TARGET_URL="$2"; shift 2 ;;
+            -f) [[ $# -ge 2 ]] || die "-f requer um arquivo"; INPUT_FILE="$2"; shift 2 ;;
+            -o) [[ $# -ge 2 ]] || die "-o requer um diretório"; OUTPUT_DIR="$2"; shift 2 ;;
+            -m) [[ $# -ge 2 ]] || die "-m requer um modo"; MODE="$2"; shift 2 ;;
+            -j) [[ $# -ge 2 ]] || die "-j requer um número"; JOBS="$2"; shift 2 ;;
+            -t) [[ $# -ge 2 ]] || die "-t requer segundos"; TIMEOUT="$2"; shift 2 ;;
+            -p) [[ $# -ge 2 ]] || die "-p requer um proxy"; PROXY="$2"; shift 2 ;;
+            -k) [[ $# -ge 2 ]] || die "-k requer uma chave"; KNOXSS_API_KEY="$2"; shift 2 ;;
+            --keep-going) KEEP_GOING=1; shift ;;
+            -h|--help) usage; exit 0 ;;
+            -v|--version) version; exit 0 ;;
+            --) shift; break ;;
+            *) die "Opção desconhecida: $1" ;;
+        esac
+    done
+
+    check_runtime
+    setup_output
+    configure_proxy
+    check_optional_tools
+
+    local targets="$TMP_DIR/targets.txt"
+    if [[ -n "$INPUT_FILE" ]]; then
+        normalize_targets "$INPUT_FILE" "$targets"
+    else
+        normalize_targets "$TARGET_URL" "$targets"
+    fi
+
+    cp -- "$targets" "$OUTPUT_DIR/meta/targets.txt"
+    log "Alvos: $(wc -l < "$targets")"
+    log "Modo: $MODE"
+    run_mode "$targets"
+
+    printf 'finished=%s\n' "$(date -Is)" >> "$OUTPUT_DIR/meta/run.txt"
+    log "Concluído. Resultados: $OUTPUT_DIR"
+}
+
+main "$@"
