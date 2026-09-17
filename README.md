@@ -89,6 +89,9 @@ chmod +x vars.sh
 | `-h`  | Exibir ajuda                                               |
 | `-v`  | Exibir versão                                              |
 
+As opções `-h`/`--help` e `-v`/`--version` exibem somente a resposta solicitada,
+sem o banner, facilitando o uso em scripts e pipelines.
+
 ### Exemplos:
 
 ```bash
