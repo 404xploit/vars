@@ -212,6 +212,7 @@ main() {
         esac
     done
     check_runtime
+    show_banner
     setup_output
     configure_proxy
     check_optional_tools
@@ -225,5 +226,4 @@ main() {
     log "Concluído. Resultados: $OUTPUT_DIR"
 }
 
-show_banner
 main "$@"
