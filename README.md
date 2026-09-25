@@ -132,7 +132,7 @@ A precedência é **CLI > variáveis de ambiente > valores padrão**. As variáv
 | `VARS_LOG4J_SCAN` | `$VARS_TOOLS_DIR/log4j-scan/log4j-scan.py` | Caminho alternativo do log4j-scan. |
 | `KNOXSS_API_KEY` | vazio | Chave usada pela integração Knoxss. |
 
-Não coloque chaves em arquivos versionados. Para reduzir exposição, o log grava apenas que a integração Knoxss foi habilitada ou ignorada; ele não grava a chave nem o valor do proxy.
+Não coloque chaves em arquivos versionados. Para reduzir exposição, o log grava apenas que a integração Knoxss foi habilitada ou ignorada; ele não grava a chave nem o valor do proxy. Valores de ambiente usados como caminhos, alvos, proxy ou credenciais são rejeitados quando contêm caracteres de controle. O processo usa `umask 077`, e o diretório de metadados da execução recebe permissões `700`.
 
 ## Proxy, timeout e concorrência
 
@@ -196,6 +196,8 @@ shellcheck -x vars.sh tests/test_cli.sh tests/test_runtime.sh tests/test_invento
 ```
 
 A suíte cobre parsing de ajuda e versão, rejeição de opções inválidas, validação de URL, deduplicação, criação de metadados, isolamento de saída, precedência CLI sobre ambiente, continuidade após falha, preservação do status final não zero, um inventário explícito das ferramentas, módulos e opções da CLI e um smoke test do pipeline completo com stubs locais. Nenhum teste dispara scanners contra um sistema real.
+
+O repositório também possui uma workflow de GitHub Actions em `.github/workflows/ci.yml`. Cada push para `main` e cada pull request executa a validação de sintaxe, os testes, o inventário, o smoke test e o ShellCheck em um runner Ubuntu.
 
 ## Troubleshooting
 

@@ -35,6 +35,7 @@ assert_file "$RECON_OUT/meta/tool-status.tsv"
 assert_file "$RECON_OUT/meta/module-status.tsv"
 assert_file "$RECON_OUT/meta/execution-status.tsv"
 assert_file "$RECON_OUT/meta/summary.txt"
+[[ "$(stat -c '%a' "$RECON_OUT/meta")" == "700" ]] || fail "metadados não estão privados"
 assert_contains "$RECON_OUT/meta/targets.txt" "https://example.com/path"
 assert_contains "$RECON_OUT/meta/targets.txt" "https://example.org/"
 assert_contains "$RECON_OUT/meta/run.txt" $'jobs=2'
@@ -64,6 +65,15 @@ if bash "$SCRIPT" -u https://example.net -m recon -p invalid-proxy -o "$PROXY_OU
     fail "proxy inválido deveria falhar"
 fi
 [[ ! -e "$PROXY_OUT" ]] || fail "proxy inválido criou artefatos antes da validação"
+
+CONTROL_OUT="$TEST_DIR/control"
+if VARS_OUTPUT_DIR=$'bad\npath' bash "$SCRIPT" -u https://example.net -m recon >/dev/null 2>&1; then
+    fail "diretório com controle deveria falhar"
+fi
+if KNOXSS_API_KEY=$'bad\nkey' bash "$SCRIPT" -u https://example.net -m recon -o "$CONTROL_OUT" >/dev/null 2>&1; then
+    fail "chave com controle deveria falhar"
+fi
+[[ ! -e "$CONTROL_OUT" ]] || fail "chave inválida criou artefatos antes da validação"
 
 PRECEDENCE_OUT="$TEST_DIR/precedence"
 PATH=/usr/bin:/bin VARS_JOBS=9 VARS_TIMEOUT=99 bash "$SCRIPT" -u https://example.net -m recon -j 2 -t 7 -o "$PRECEDENCE_OUT" >/dev/null 2>&1

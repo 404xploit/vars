@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 IFS=$'\n\t'
+umask 077
 
-VERSION="2.1.0"
+VERSION="2.2.0"
 
 # Defaults can be overridden by VARS_* environment variables. CLI options win.
 OUTPUT_DIR="${VARS_OUTPUT_DIR:-vars_results}"
@@ -190,6 +191,20 @@ require_cmd() {
     has_tool "$1" || die "Dependência básica ausente: $1"
 }
 
+contains_control_chars() {
+    case "$1" in
+        *$'\n'*|*$'\r'*|*$'\t'*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+validate_no_control_chars() {
+    local name="$1" value="$2"
+    if contains_control_chars "$value"; then
+        die "${name} não pode conter caracteres de controle"
+    fi
+}
+
 tool_available() {
     local tool="$1"
     case "$tool" in
@@ -270,6 +285,18 @@ check_runtime() {
     [[ "$OUTPUT_REUSE" =~ ^[01]$ ]] || die "VARS_OUTPUT_REUSE deve ser 0 ou 1"
     [[ -n "$OUTPUT_DIR" && "$OUTPUT_DIR" != "/" ]] || die "Diretório de saída inválido"
     [[ -z "$PROXY" || "$PROXY" =~ ^https?://[^[:space:]]+$ ]] || die "Proxy deve usar http:// ou https:// sem espaços"
+    validate_no_control_chars "Diretório de saída" "$OUTPUT_DIR"
+    validate_no_control_chars "Diretório de ferramentas" "$TOOLS_DIR"
+    validate_no_control_chars "Diretório de binários" "$BIN_DIR"
+    validate_no_control_chars "Interpretador Python" "$PYTHON_BIN"
+    validate_no_control_chars "Assinaturas Jaeles" "$JAELES_SIGNATURES"
+    validate_no_control_chars "Templates Nuclei" "$NUCLEI_TEMPLATES"
+    validate_no_control_chars "Caminho ParamSpider" "$PARAMSPIDER"
+    validate_no_control_chars "Caminho XSStrike" "$XSSTRIKE"
+    validate_no_control_chars "Caminho log4j-scan" "$LOG4J_SCAN"
+    validate_no_control_chars "Chave Knoxss" "$KNOXSS_API_KEY"
+    validate_no_control_chars "URL alvo" "$TARGET_URL"
+    validate_no_control_chars "Arquivo de entrada" "$INPUT_FILE"
     [[ -z "$TARGET_URL" || -z "$INPUT_FILE" ]] || die "Use -u ou -f, não ambos"
     [[ -n "$TARGET_URL" || -n "$INPUT_FILE" ]] || die "Forneça -u ou -f"
     [[ -z "$INPUT_FILE" || -f "$INPUT_FILE" ]] || die "Arquivo não encontrado: $INPUT_FILE"
@@ -297,7 +324,7 @@ setup_output() {
         log WARN "O diretório de saída não estava vazio; usando execução isolada: $OUTPUT_DIR"
     fi
     mkdir -p -- "$OUTPUT_DIR"/{recon,xss,sqli,log4j,nuclei,misc,meta}
-    chmod 700 -- "$OUTPUT_DIR/meta" 2>/dev/null || true
+    chmod 700 -- "$OUTPUT_DIR/meta"
     TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vars.XXXXXX")"
     chmod 700 -- "$TMP_DIR"
     LOG_FILE="$OUTPUT_DIR/meta/vars.log"
