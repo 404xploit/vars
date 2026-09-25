@@ -1,213 +1,214 @@
-<img src="https://capsule-render.vercel.app/api?type=transparent&height=300&color=gradient&text=VARS&desc=Vulnerability%20Assessment%20and%20Recon%20Script&fontAlignY=50&descSize=30&fontSize=100&descAlignY=68">
+# VARS — Vulnerability Automated Recon Suite
 
-![Shell Script](https://img.shields.io/badge/Bash-Script-blue)
+**VARS** é um script Bash para automatizar reconhecimento e triagem de segurança web em ativos próprios ou explicitamente autorizados. A versão atual preserva as opções de linha de comando da série 2.x e acrescenta isolamento de resultados, inventário de ferramentas, status por etapa, fallbacks e metadados de execução.
 
+> **Uso autorizado somente.** O operador é responsável por obter autorização, respeitar escopo, limites de taxa e legislação aplicável. O projeto não deve ser usado contra sistemas de terceiros sem permissão explícita.
 
-**VARS** (Vulnerability Automated Recon Suite) é um script Bash poderoso e automatizado para **varredura de vulnerabilidades web**, combinando ferramentas do ecossistema de bug bounty, pentest e red teaming.
+## Características principais
 
----
+VARS aceita uma URL individual ou um arquivo de alvos. As entradas são filtradas para URLs HTTP(S), normalizadas e deduplicadas antes da execução. O pipeline é modular e pode executar reconhecimento, XSS, SQL injection, Nuclei, Log4j ou o fluxo completo.
 
-##  Funcionalidades
+As ferramentas opcionais são detectadas individualmente. A ausência de uma ferramenta não interrompe automaticamente o pipeline: a execução registra a ferramenta como indisponível e utiliza um fallback seguro quando esse fallback mantém o significado do resultado. Falhas de ferramentas são registradas com código de retorno e duração.
 
-- ✅ Escaneia URLs individuais ou arquivos com listas de URLs
-- ✅ Detecta automaticamente:
-  - Cross-Site Scripting (XSS)
-  - SQL Injection (SQLi)
-  - Server-Side Template Injection (SSTI), quando suportado pelas ferramentas integradas
-  - Log4Shell (CVE-2021-44228)
--  Coleta e normalização de URLs com ferramentas de recon
--  Resultados organizados em diretórios por categoria (xss, sqli, etc.)
--  Totalmente automatizado e fácil de usar
--  Integração com ferramentas líderes do mercado (Nuclei, Knoxss, XSStrike, Dalfox, Xray, etc.)
--  Suporte a proxy HTTP/HTTPS para redirecionamento via Burp/ZAP
--  Execução por módulos através da opção `-m`
--  Tratamento de erros, diretório temporário isolado e limpeza automática
+Cada execução cria metadados, logs e arquivos de status. Se o diretório solicitado já tiver conteúdo, VARS cria uma subpasta `run-<timestamp>-<pid>` para não sobrescrever resultados anteriores. A reutilização explícita de um diretório existente exige `VARS_OUTPUT_REUSE=1`.
 
----
+## Requisitos
 
-##  Ferramentas utilizadas
+Os requisitos básicos são:
 
-O VARS integra e automatiza o uso de diversas ferramentas de segurança:
+- Bash 4 ou superior;
+- Linux compatível com Ubuntu/Debian e Kali Linux;
+- `awk`, `grep`, `sed`, `sort`, `mktemp`, `xargs`, `curl`, `git`, `date`, `mkdir`, `cp`, `rm`, `wc` e `find`;
+- `python3` somente quando forem usadas as integrações em formato de script: ParamSpider, XSStrike ou log4j-scan.
 
-| Ferramenta       | Finalidade                          |
-|------------------|--------------------------------------|
-| `httpx`          | Verificação de URLs ativas          |
-| `gf`             | Filtros para XSS, SQLi, etc.         |
-| `dalfox`         | XSS avançado e fuzzing              |
-| `nuclei`         | PoC scanner baseado em templates     |
-| `jaeles`         | Scanner modular com fuzzing         |
-| `xsstrike`       | Detecção e exploração de XSS         |
-| `sqlmap`         | Teste de injeção SQL automatizado    |
-| `xray`           | Scanner avançado para web vulns     |
-| `paramspider`    | Coleta de parâmetros de URLs         |
-| `log4j-scan`     | Scanner para Log4Shell               |
-| `bhedak`, `airixss`, `kxss`, `freq` | Detecção e fuzz complementar |
+As ferramentas de segurança são opcionais. O VARS não instala dependências automaticamente e nunca executa comandos de instalação privilegiados.
 
----
+## Instalação
 
-##  Instalação
-
-O VARS não instala automaticamente as dependências. Instale as ferramentas que deseja utilizar e deixe-as disponíveis no `PATH`.
-
-Dependências básicas:
-
-- Bash 4+
-- curl
-- git
-- awk, grep, sed, sort, xargs e mktemp
-
-Ferramentas de scanner são opcionais; o VARS executa os módulos disponíveis e informa as ferramentas encontradas no início da execução.
+Clone o repositório e torne o script executável:
 
 ```bash
-chmod +x vars.sh
-./vars.sh -h
+git clone https://github.com/404xploit/vars.git
+cd vars
+chmod +x vars.sh tests/test_cli.sh tests/test_runtime.sh
+./vars.sh --help
 ```
 
-> Para ferramentas Python mantidas fora do `PATH`, configure os caminhos usando as variáveis `VARS_TOOLS_DIR`, `VARS_PARAMSPIDER`, `VARS_XSSTRIKE` ou `VARS_LOG4J_SCAN`.
+Instale apenas as ferramentas compatíveis com o seu ambiente e deixe-as no `PATH`. Para ferramentas Python mantidas fora do `PATH`, use os caminhos documentados na seção de configuração.
 
----
-
-##  Uso
+## Uso básico
 
 ```bash
-./vars.sh [opções]
-```
-
-### Opções disponíveis:
-
-| Opção | Descrição                                                  |
-| ----- | ---------------------------------------------------------- |
-| `-u`  | Escanear uma única URL (ex: `https://testphp.vulnweb.com`) |
-| `-f`  | Escanear URLs de um arquivo (uma por linha)                |
-| `-o`  | Diretório de saída (padrão: `vars_results`)                |
-| `-m`  | Modo de execução: `full`, `recon`, `xss`, `sqli`, `nuclei` ou `log4j` |
-| `-j`  | Concorrência utilizada pelas ferramentas que suportam threads |
-| `-t`  | Timeout em segundos para integrações HTTP compatíveis      |
-| `-p`  | Definir proxy HTTP/HTTPS (ex: `http://127.0.0.1:8080`)    |
-| `-k`  | Definir a chave da API do Knoxss                           |
-| `--keep-going` | Continuar quando um módulo falhar                  |
-| `-h`  | Exibir ajuda                                               |
-| `-v`  | Exibir versão                                              |
-
-As opções `-h`/`--help` e `-v`/`--version` exibem somente a resposta solicitada,
-sem o banner, facilitando o uso em scripts e pipelines.
-
-### Exemplos:
-
-```bash
-./vars.sh -u https://example.com
 ./vars.sh -u https://example.com -m recon
-./vars.sh -u https://example.com -m xss
-./vars.sh -f targets.txt -m sqli -o results
-./vars.sh -f targets.txt -m full -j 10
-./vars.sh -f targets.txt -p http://127.0.0.1:8080
-KNOXSS_API_KEY="[SUA_CHAVE]" ./vars.sh -f targets.txt -m xss
+./vars.sh -f targets.txt -m xss -o results
+./vars.sh -f targets.txt -m sqli -j 10 -t 30
+./vars.sh -f targets.txt -p http://127.0.0.1:8080 --keep-going
+KNOXSS_API_KEY="sua-chave" ./vars.sh -f targets.txt -m xss
 ```
 
-### Modos de execução:
+Execute scanners apenas sobre alvos autorizados. O exemplo acima usa `example.com` apenas como placeholder; substitua-o por um ativo dentro do escopo permitido.
 
-| Modo | Descrição |
-|------|-----------|
-| `recon` | Reconhecimento, descoberta e normalização de URLs |
-| `xss` | Recon + scanners de XSS |
-| `sqli` | Recon + candidatos SQLi + SQLmap/Nuclei |
-| `nuclei` | Nuclei sobre os alvos fornecidos |
-| `log4j` | Avaliação Log4j nos alvos fornecidos |
-| `full` | Executa o pipeline completo |
+## Opções da CLI
 
----
+| Opção | Descrição |
+| --- | --- |
+| `-u <url>` | Escaneia uma URL HTTP(S). |
+| `-f <arquivo>` | Lê URLs do arquivo, uma por linha; linhas vazias e comentários iniciados por `#` são ignorados. |
+| `-o <dir>` | Define o diretório base de saída. O padrão é `vars_results`. |
+| `-m <modo>` | Seleciona `full`, `recon`, `xss`, `sqli`, `nuclei` ou `log4j`. O padrão é `full`. |
+| `-j <jobs>` | Define a concorrência passada às ferramentas que oferecem controle de workers ou threads. O padrão é `5`. |
+| `-t <seg>` | Define o timeout em segundos para integrações que aceitam esse parâmetro. O padrão é `15`. |
+| `-p <proxy>` | Define um proxy `http://` ou `https://` e exporta as variantes maiúsculas e minúsculas usadas por clientes HTTP. O valor não é gravado nos logs. |
+| `-k <chave>` | Define a chave da API do Knoxss para a execução atual. Prefira `KNOXSS_API_KEY`. A chave nunca é impressa. |
+| `--keep-going` | Continua para os módulos seguintes após falha de um módulo. O status final continua sendo não zero quando houve falha. |
+| `-h`, `--help` | Exibe a ajuda sem banner e sem executar validação de alvo. |
+| `-v`, `--version` | Exibe a versão sem banner. |
 
-##  Requisitos
+As opções existentes mantêm seu significado. `-u` e `-f` são mutuamente exclusivos. Uma execução sem alvo, com modo inválido, valor numérico inválido, proxy inválido ou arquivo inexistente termina com erro claro.
 
-- Bash 4+
-- `curl`, `git`, `awk`, `grep`, `sed`, `sort`, `xargs` e `mktemp`
-- Linux com permissão de escrita em diretório temporário
-- Ferramentas de segurança desejadas instaladas e disponíveis no `PATH`
+## Modos
 
-Ferramentas opcionais reconhecidas incluem `httpx`, `gau`, `uro`, `gf`, `dalfox`, `nuclei`, `sqlmap`, `jaeles`, `xray`, `kxss`, `bhedak`, `airixss`, `freq`, `hakrawler`, `qsreplace`, `anew`, `paramspider`, `xsstrike` e `log4j-scan`.
+| Modo | Pipeline |
+| --- | --- |
+| `recon` | Verificação de alvos ativos com httpx quando disponível, coleta histórica com gau, normalização com uro, crawling com hakrawler e geração de `recon/candidates.txt`. ParamSpider é executado quando disponível. |
+| `xss` | Reconhecimento seguido por kxss, Dalfox, XSStrike, Nuclei com tags XSS, Bhedak, cadeias Airixss/Freq e Knoxss quando a chave estiver configurada. Cada integração é opcional. |
+| `sqli` | Reconhecimento seguido por GF/HTTPX/SQLmap, uma verificação heurística com qsreplace/HTTPX e Nuclei com tags SQLi. |
+| `nuclei` | Executa Nuclei diretamente sobre os alvos. Usa `VARS_NUCLEI_TEMPLATES` quando o diretório existir; caso contrário usa os templates padrão da instalação. |
+| `log4j` | Executa log4j-scan sobre cada URL quando o binário ou script estiver disponível. |
+| `full` | Executa, em ordem, `recon`, `xss`, `sqli`, `log4j`, `nuclei` e as integrações legadas de Jaeles e Xray. |
 
----
+A execução é sequencial entre módulos para priorizar estabilidade e isolamento. O valor de `-j` é aplicado dentro das ferramentas que o suportam; ele não cria um número arbitrário de processos Bash fora do controle dos scanners.
 
-##  Estrutura dos Resultados
+## Ferramentas preservadas
 
-```
+O inventário de cada execução mantém todas as integrações suportadas pelo projeto e informa `available` ou `missing` em `meta/tool-status.tsv`.
+
+| Ferramenta | Uso no pipeline |
+| --- | --- |
+| `httpx` | Verificação de alvos ativos e requisições de suporte. |
+| `gau` | Coleta de URLs históricas. |
+| `uro` | Normalização e deduplicação de URLs. |
+| `gf` | Seleção de candidatos para XSS e SQLi. |
+| `dalfox` | Triagem de XSS. |
+| `nuclei` | Templates de segurança, incluindo tags XSS e SQLi. |
+| `sqlmap` | Triagem automatizada de SQLi a partir de candidatos. |
+| `jaeles` | Execução das assinaturas configuradas, quando disponíveis. |
+| `xray` | Web scan com os plugins legados do projeto. |
+| `kxss` | Identificação de parâmetros refletidos. |
+| `bhedak` | Cadeias de XSS/SSTI e integração com deduplicação. |
+| `airixss` | Verificações complementares de XSS. |
+| `freq` | Verificação complementar de XSS. |
+| `hakrawler` | Crawling de URLs e subdomínios. |
+| `qsreplace` | Substituição de parâmetros nas cadeias legadas de XSS e SQLi. |
+| `anew` | Deduplicação na cadeia de candidatos SQLi quando instalado. |
+| `paramspider` | Coleta de parâmetros a partir de domínios. |
+| `xsstrike` | XSS e fuzzer por script Python. |
+| `log4j-scan` | Verificação de Log4Shell por binário ou script Python. |
+| `urldedupe` | Integração legada de deduplicação para a cadeia Bhedak/Airixss. |
+| Knoxss API | Integração remota de XSS habilitada somente com `KNOXSS_API_KEY`. |
+
+A entrada histórica `tool` permanece no inventário de compatibilidade como marcador legado, mas não é tratada como scanner e é sempre reportada como indisponível. Ela não executa comandos.
+
+## Configuração
+
+A precedência é **CLI > variáveis de ambiente > valores padrão**. As variáveis abaixo são opcionais:
+
+| Variável | Padrão | Finalidade |
+| --- | --- | --- |
+| `VARS_OUTPUT_DIR` | `vars_results` | Diretório padrão de saída. |
+| `VARS_MODE` | `full` | Modo padrão. |
+| `VARS_JOBS` | `5` | Concorrência padrão. |
+| `VARS_TIMEOUT` | `15` | Timeout padrão em segundos. |
+| `VARS_PROXY` | vazio | Proxy padrão. |
+| `VARS_KEEP_GOING` | `0` | Use `1` para o equivalente padrão de `--keep-going`. |
+| `VARS_OUTPUT_REUSE` | `0` | Use `1` para permitir reutilização explícita de um diretório não vazio. |
+| `VARS_TOOLS_DIR` | `~/.local/share/vars/tools` | Raiz dos recursos mantidos fora do `PATH`. |
+| `VARS_BIN_DIR` | `~/.local/bin` | Diretório de binários adicionado ao início do `PATH` se existir. |
+| `VARS_PYTHON` | `python3` | Interpretador usado pelos scripts Python. |
+| `VARS_JAELES_SIGNATURES` | `$VARS_TOOLS_DIR/jaeles-signatures` | Diretório de assinaturas do Jaeles. |
+| `VARS_NUCLEI_TEMPLATES` | `$VARS_TOOLS_DIR/nuclei-templates` | Diretório de templates do Nuclei. |
+| `VARS_PARAMSPIDER` | `$VARS_TOOLS_DIR/ParamSpider/paramspider.py` | Caminho alternativo do ParamSpider. |
+| `VARS_XSSTRIKE` | `$VARS_TOOLS_DIR/XSStrike/xsstrike.py` | Caminho alternativo do XSStrike. |
+| `VARS_LOG4J_SCAN` | `$VARS_TOOLS_DIR/log4j-scan/log4j-scan.py` | Caminho alternativo do log4j-scan. |
+| `KNOXSS_API_KEY` | vazio | Chave usada pela integração Knoxss. |
+
+Não coloque chaves em arquivos versionados. Para reduzir exposição, o log grava apenas que a integração Knoxss foi habilitada ou ignorada; ele não grava a chave nem o valor do proxy.
+
+## Proxy, timeout e concorrência
+
+`-p` valida o esquema `http://` ou `https://` e configura `HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy` e `https_proxy` apenas no processo do VARS e nos filhos. `-t` é aplicado quando a ferramenta oferece uma opção equivalente; integrações que não expõem timeout próprio continuam sujeitas ao comportamento nativo da ferramenta. `-j` é passado às ferramentas com suporte a threads, workers ou concorrência.
+
+A ausência de uma ferramenta não é tratada como um convite para instalar ou baixar código durante a execução. O operador pode instalar e atualizar dependências separadamente, de acordo com a política do ambiente.
+
+## Estrutura dos resultados
+
+Uma execução bem-sucedida cria esta estrutura, mantendo os caminhos principais da série 2.x:
+
+```text
 vars_results/
-├── xss/
-├── sqli/
-├── log4j/
-├── nuclei/
 ├── recon/
 │   ├── live.txt
 │   ├── gau.txt
 │   ├── urls.txt
 │   ├── crawl.txt
 │   └── candidates.txt
+├── xss/
+├── sqli/
+│   └── sqlmap/
+├── log4j/
+├── nuclei/
 ├── misc/
 └── meta/
     ├── run.txt
-    └── targets.txt
+    ├── targets.txt
+    ├── vars.log
+    ├── summary.txt
+    ├── tool-status.tsv
+    ├── module-status.tsv
+    └── execution-status.tsv
 ```
 
----
+Os arquivos TSV têm cabeçalho e podem ser processados por ferramentas Unix. `tool-status.tsv` registra disponibilidade e localização. `execution-status.tsv` registra etapas executadas, ignoradas ou falhas, com código de retorno e duração. `module-status.tsv` registra o estado de cada módulo. `summary.txt` reúne os metadados e as contagens finais.
 
-##  Metodologia
+## Tratamento de falhas e códigos de saída
 
-Abaixo está o diagrama da metodologia do script, representado em Mermaid, ilustrando o fluxo de execução desde a entrada até a geração dos resultados:
+O comportamento padrão interrompe a execução quando um módulo selecionado falha, preservando os resultados parciais. Com `--keep-going`, os módulos seguintes são executados, mas o processo termina com código `1` se qualquer módulo tiver falhado. Uma ferramenta ausente pode resultar em uma etapa `skipped`; quando todas as etapas disponíveis forem ignoradas, isso é registrado sem transformar a ausência opcional em falha fatal.
 
-```mermaid
-flowchart TD
-    Start([Início do Script]) --> Args[Parsear argumentos]
-    Args --> ValidateInput[Validar entrada: -u ou -f]
+| Código | Significado |
+| --- | --- |
+| `0` | Execução concluída sem falha de módulo. |
+| `1` | Entrada ou configuração inválida, dependência básica ausente, falha de módulo ou falha inesperada. |
+| `130` | Execução interrompida por `SIGINT` ou `SIGTERM`. |
 
-    ValidateInput -->|Sem -u ou -f| ErrorNoInput[Erro: URL ou arquivo necessário]
-    ValidateInput -->|Arquivo -f inválido| ErrorFile[Erro: Arquivo não encontrado]
-    ValidateInput -->|Entrada válida| SetProxy{Proxy fornecido?}
+Sinais são tratados para remover o diretório temporário privado. O diretório temporário usa `mktemp -d` e é removido por `trap` no encerramento.
 
-    SetProxy -- Sim --> ConfigurarProxy[Exportar HTTP_PROXY\ne HTTPS_PROXY]
-    SetProxy -- Não --> SkipProxy[Ignorar proxy]
+## Testes e validação
 
-    ConfigurarProxy --> CheckDeps
-    SkipProxy --> CheckDeps
+Os testes não executam scanners contra sistemas reais. O teste de runtime usa alvos fictícios, restringe o `PATH` para simular ferramentas ausentes e cria um stub local para simular uma falha de ferramenta.
 
-    CheckDeps[Verificar dependências básicas e ferramentas disponíveis] --> SetupOut[Criar estrutura de diretórios]
-    SetupOut --> Normalize[Normalizar e validar URLs]
-    Normalize --> Recon[Executar recon quando necessário]
-
-    Recon --> Scans[Executar módulos de escaneamento]
-
-    subgraph Escaneamentos
-        Scans --> Knoxss[Knoxss XSS Scan]
-        Scans --> Log4j[Log4j Scan]
-        Scans --> KXSS[KXSS Scan]
-        Scans --> DalfoxXS[Dalfox + XSStrike]
-        Scans --> SQLiMass[SQLi com SQLmap]
-        Scans --> Nuclei[Nuclei Scan]
-    end
-
-    Nuclei --> Done([✔ Todos os Scans Concluídos])
-
-    %% Estilos
-    classDef start fill:#2ecc71,stroke:#27ae60,stroke-width:2px,color:#fff
-    classDef error fill:#e74c3c,stroke:#c0392b,stroke-width:2px,color:#fff
-    classDef process fill:#3498db,stroke:#2980b9,stroke-width:2px,color:#fff
-    classDef decision fill:#e67e22,stroke:#d35400,stroke-width:2px,color:#fff
-    classDef scan fill:#9b59b6,stroke:#8e44ad,stroke-width:2px,color:#fff
-    classDef subgraphStyle fill:none,stroke:#7f8c8d,stroke-width:2px
-
-    class Start,Done start
-    class Args,ConfigurarProxy,SkipProxy,CheckDeps,SetupOut,Normalize,Recon,Scans process
-    class ErrorNoInput,ErrorFile error
-    class SetProxy,ValidateInput decision
-    class Knoxss,Log4j,KXSS,DalfoxXS,SQLiMass,Nuclei scan
-    class Escaneamentos subgraphStyle
+```bash
+bash -n vars.sh
+bash tests/test_cli.sh
+bash tests/test_runtime.sh
+bash tests/test_inventory.sh
+bash tests/test_pipeline.sh
+shellcheck -x vars.sh tests/test_cli.sh tests/test_runtime.sh tests/test_inventory.sh tests/test_pipeline.sh
 ```
 
-##  Contribuição
+A suíte cobre parsing de ajuda e versão, rejeição de opções inválidas, validação de URL, deduplicação, criação de metadados, isolamento de saída, precedência CLI sobre ambiente, continuidade após falha, preservação do status final não zero, um inventário explícito das ferramentas, módulos e opções da CLI e um smoke test do pipeline completo com stubs locais. Nenhum teste dispara scanners contra um sistema real.
 
-Pull Requests e sugestões são bem-vindas! Abra uma issue ou envie seu PR.
+## Troubleshooting
 
----
+Se uma ferramenta aparecer como `missing`, confirme sua instalação, permissões de execução e presença no `PATH`. Para scripts Python, confirme `VARS_PYTHON` e o caminho configurado pela variável correspondente. Para Jaeles e Nuclei, confirme também a existência dos diretórios de assinaturas ou templates.
 
-## ⚠️ Aviso Legal
+Se uma execução for interrompida por falha de scanner, examine `meta/vars.log`, `meta/execution-status.tsv` e `meta/summary.txt`. Use `--keep-going` para obter resultados dos módulos restantes, lembrando que uma falha continuará refletida no código de saída.
 
-Este script foi desenvolvido **exclusivamente para fins educacionais e de teste em ambientes autorizados**. O uso indevido pode violar leis locais. **Use com responsabilidade.**
+Se resultados anteriores estiverem no diretório escolhido, procure a pasta `run-*` criada automaticamente. Para reutilizar conscientemente um diretório, defina `VARS_OUTPUT_REUSE=1` e faça backup dos resultados que deseja preservar.
+
+## Contribuição
+
+Pull requests e sugestões são bem-vindos. Mudanças em integrações devem manter a entrada correspondente no inventário e acrescentar testes com mocks ou stubs quando a ferramenta externa não puder ser executada em ambiente de CI.
+
+## Licença e aviso
+
+Consulte os arquivos do repositório para as informações de licença aplicáveis. O uso indevido de scanners de segurança pode violar leis e contratos. Utilize o VARS somente dentro de um escopo autorizado.
