@@ -35,11 +35,16 @@ assert_file "$RECON_OUT/meta/tool-status.tsv"
 assert_file "$RECON_OUT/meta/module-status.tsv"
 assert_file "$RECON_OUT/meta/execution-status.tsv"
 assert_file "$RECON_OUT/meta/summary.txt"
+assert_file "$RECON_OUT/meta/scope.txt"
+assert_file "$RECON_OUT/meta/out-of-scope.tsv"
 [[ "$(stat -c '%a' "$RECON_OUT/meta")" == "700" ]] || fail "metadados não estão privados"
 assert_contains "$RECON_OUT/meta/targets.txt" "https://example.com/path"
 assert_contains "$RECON_OUT/meta/targets.txt" "https://example.org/"
 assert_contains "$RECON_OUT/meta/run.txt" $'jobs=2'
 assert_contains "$RECON_OUT/meta/run.txt" $'timeout=7'
+assert_contains "$RECON_OUT/meta/run.txt" $'scope_source=targets'
+assert_contains "$RECON_OUT/meta/scope.txt" 'example.com'
+assert_contains "$RECON_OUT/meta/scope.txt" 'example.org'
 assert_contains "$RECON_OUT/meta/summary.txt" $'exit_status=0'
 
 SKIPPED_OUT="$TEST_DIR/skipped"
@@ -59,6 +64,7 @@ assert_file "$REUSED_OUT/marker.txt"
 if bash "$SCRIPT" -u example.com -m recon -o "$TEST_DIR/invalid" >/dev/null 2>&1; then
     fail "URL inválida deveria falhar"
 fi
+[[ ! -e "$TEST_DIR/invalid" ]] || fail "URL inválida criou artefatos antes da validação"
 
 PROXY_OUT="$TEST_DIR/proxy"
 if bash "$SCRIPT" -u https://example.net -m recon -p invalid-proxy -o "$PROXY_OUT" >/dev/null 2>&1; then

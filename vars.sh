@@ -3,7 +3,7 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 umask 077
 
-VERSION="2.2.0"
+VERSION="2.3.0"
 
 # Defaults can be overridden by VARS_* environment variables. CLI options win.
 OUTPUT_DIR="${VARS_OUTPUT_DIR:-vars_results}"
@@ -16,6 +16,9 @@ TIMEOUT="${VARS_TIMEOUT:-15}"
 KNOXSS_API_KEY="${KNOXSS_API_KEY:-}"
 KEEP_GOING="${VARS_KEEP_GOING:-0}"
 OUTPUT_REUSE="${VARS_OUTPUT_REUSE:-0}"
+SCOPE_FILE="${VARS_SCOPE_FILE:-}"
+INCLUDE_SUBDOMAINS="${VARS_INCLUDE_SUBDOMAINS:-0}"
+ALLOW_OUT_OF_SCOPE="${VARS_ALLOW_OUT_OF_SCOPE:-0}"
 
 TOOLS_DIR="${VARS_TOOLS_DIR:-${HOME}/.local/share/vars/tools}"
 BIN_DIR="${VARS_BIN_DIR:-${HOME}/.local/bin}"
@@ -33,6 +36,8 @@ SUMMARY_FILE=""
 TOOL_STATUS_FILE=""
 MODULE_STATUS_FILE=""
 EXECUTION_STATUS_FILE=""
+SCOPE_HOSTS_FILE=""
+OUT_OF_SCOPE_FILE=""
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 START_EPOCH="$(date +%s)"
 CURRENT_MODULE_RAN=0
@@ -44,6 +49,9 @@ TOOL_NAMES=(
     httpx gau uro gf dalfox nuclei sqlmap jaeles xray kxss bhedak airixss freq
     hakrawler qsreplace anew paramspider xsstrike log4j-scan urldedupe tool
 )
+
+declare -A SCOPE_HOSTS=()
+declare -A RECORDED_SCOPE_URLS=()
 
 # Keep the original banner, but do not print it for --help/--version.
 show_banner() {
@@ -113,9 +121,19 @@ write_summary() {
         printf 'jobs=%s\n' "$JOBS"
         printf 'timeout=%s\n' "$TIMEOUT"
         printf 'keep_going=%s\n' "$KEEP_GOING"
+        printf 'scope_source=%s\n' "$([[ -n "$SCOPE_FILE" ]] && printf '%s' "$SCOPE_FILE" || printf 'targets')"
+        printf 'include_subdomains=%s\n' "$INCLUDE_SUBDOMAINS"
+        printf 'allow_out_of_scope=%s\n' "$ALLOW_OUT_OF_SCOPE"
+        if [[ -f "$SCOPE_HOSTS_FILE" ]]; then
+            printf 'scope_hosts=%s\n' "$(wc -l < "$SCOPE_HOSTS_FILE")"
+        fi
         printf 'started=%s\n' "$(date -u -d "@$START_EPOCH" -Is)"
         printf 'finished=%s\n' "$(date -Is)"
         printf 'exit_status=%s\n' "${1:-0}"
+        if [[ -f "$OUT_OF_SCOPE_FILE" ]]; then
+            printf '\n[scope_counts]\n'
+            awk -F '\t' 'NR > 1 { count[$3]++ } END { for (action in count) printf "%s=%d\n", action, count[action] }' "$OUT_OF_SCOPE_FILE" | sort
+        fi
         if [[ -f "$MODULE_STATUS_FILE" ]]; then
             printf '\n[module_counts]\n'
             awk -F '\t' 'NR > 1 { count[$3]++ } END { for (status in count) printf "%s=%d\n", status, count[status] }' "$MODULE_STATUS_FILE" | sort
@@ -166,14 +184,21 @@ Uso: $0 [opções]
   -t <seg>       Timeout HTTP das integrações compatíveis (padrão: 15)
   -p <proxy>     Proxy HTTP/HTTPS
   -k <chave>     Chave Knoxss; prefira KNOXSS_API_KEY
+  --scope-file <arquivo>
+                  Define os hosts autorizados, um host ou URL por linha
+  --include-subdomains
+                  Autoriza subdomínios dos hosts do escopo
+  --allow-out-of-scope
+                  Mantém URLs descobertas fora do escopo, registrando a exceção
   --keep-going   Continua quando um módulo falha
   -h, --help     Ajuda
   -v, --version  Versão
 
 Variáveis de configuração: VARS_OUTPUT_DIR, VARS_MODE, VARS_JOBS,
-VARS_TIMEOUT, VARS_PROXY, VARS_KEEP_GOING, VARS_OUTPUT_REUSE, VARS_TOOLS_DIR,
-VARS_BIN_DIR, VARS_PYTHON, VARS_JAELES_SIGNATURES, VARS_NUCLEI_TEMPLATES,
-VARS_PARAMSPIDER, VARS_XSSTRIKE, VARS_LOG4J_SCAN e KNOXSS_API_KEY.
+VARS_TIMEOUT, VARS_PROXY, VARS_KEEP_GOING, VARS_OUTPUT_REUSE, VARS_SCOPE_FILE,
+VARS_INCLUDE_SUBDOMAINS, VARS_ALLOW_OUT_OF_SCOPE, VARS_TOOLS_DIR, VARS_BIN_DIR,
+VARS_PYTHON, VARS_JAELES_SIGNATURES, VARS_NUCLEI_TEMPLATES, VARS_PARAMSPIDER,
+VARS_XSSTRIKE, VARS_LOG4J_SCAN e KNOXSS_API_KEY.
 
 Use somente em ativos próprios ou explicitamente autorizados.
 EOF
@@ -192,10 +217,7 @@ require_cmd() {
 }
 
 contains_control_chars() {
-    case "$1" in
-        *$'\n'*|*$'\r'*|*$'\t'*) return 0 ;;
-        *) return 1 ;;
-    esac
+    [[ "$1" =~ [[:cntrl:]] ]]
 }
 
 validate_no_control_chars() {
@@ -283,6 +305,8 @@ check_runtime() {
     [[ "$TIMEOUT" =~ ^[1-9][0-9]*$ ]] || die "-t deve ser um inteiro positivo"
     [[ "$KEEP_GOING" =~ ^[01]$ ]] || die "VARS_KEEP_GOING deve ser 0 ou 1"
     [[ "$OUTPUT_REUSE" =~ ^[01]$ ]] || die "VARS_OUTPUT_REUSE deve ser 0 ou 1"
+    [[ "$INCLUDE_SUBDOMAINS" =~ ^[01]$ ]] || die "VARS_INCLUDE_SUBDOMAINS deve ser 0 ou 1"
+    [[ "$ALLOW_OUT_OF_SCOPE" =~ ^[01]$ ]] || die "VARS_ALLOW_OUT_OF_SCOPE deve ser 0 ou 1"
     [[ -n "$OUTPUT_DIR" && "$OUTPUT_DIR" != "/" ]] || die "Diretório de saída inválido"
     [[ -z "$PROXY" || "$PROXY" =~ ^https?://[^[:space:]]+$ ]] || die "Proxy deve usar http:// ou https:// sem espaços"
     validate_no_control_chars "Diretório de saída" "$OUTPUT_DIR"
@@ -297,10 +321,13 @@ check_runtime() {
     validate_no_control_chars "Chave Knoxss" "$KNOXSS_API_KEY"
     validate_no_control_chars "URL alvo" "$TARGET_URL"
     validate_no_control_chars "Arquivo de entrada" "$INPUT_FILE"
+    validate_no_control_chars "Arquivo de escopo" "$SCOPE_FILE"
     [[ -z "$TARGET_URL" || -z "$INPUT_FILE" ]] || die "Use -u ou -f, não ambos"
     [[ -n "$TARGET_URL" || -n "$INPUT_FILE" ]] || die "Forneça -u ou -f"
     [[ -z "$INPUT_FILE" || -f "$INPUT_FILE" ]] || die "Arquivo não encontrado: $INPUT_FILE"
     [[ -z "$INPUT_FILE" || -r "$INPUT_FILE" ]] || die "Arquivo sem permissão de leitura: $INPUT_FILE"
+    [[ -z "$SCOPE_FILE" || -f "$SCOPE_FILE" ]] || die "Arquivo de escopo não encontrado: $SCOPE_FILE"
+    [[ -z "$SCOPE_FILE" || -r "$SCOPE_FILE" ]] || die "Arquivo de escopo sem permissão de leitura: $SCOPE_FILE"
     case "$MODE" in
         full|recon|xss|sqli|nuclei|log4j) ;;
         *) die "Modo inválido: $MODE" ;;
@@ -314,6 +341,11 @@ configure_proxy() {
     log INFO "Proxy HTTP/HTTPS configurado (valor omitido dos logs)"
 }
 
+setup_temp() {
+    TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vars.XXXXXX")"
+    chmod 700 -- "$TMP_DIR"
+}
+
 setup_output() {
     if [[ -e "$OUTPUT_DIR" && ! -d "$OUTPUT_DIR" ]]; then
         die "O caminho de saída existe e não é um diretório: $OUTPUT_DIR"
@@ -325,20 +357,22 @@ setup_output() {
     fi
     mkdir -p -- "$OUTPUT_DIR"/{recon,xss,sqli,log4j,nuclei,misc,meta}
     chmod 700 -- "$OUTPUT_DIR/meta"
-    TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vars.XXXXXX")"
-    chmod 700 -- "$TMP_DIR"
     LOG_FILE="$OUTPUT_DIR/meta/vars.log"
     RUN_FILE="$OUTPUT_DIR/meta/run.txt"
     SUMMARY_FILE="$OUTPUT_DIR/meta/summary.txt"
     TOOL_STATUS_FILE="$OUTPUT_DIR/meta/tool-status.tsv"
     MODULE_STATUS_FILE="$OUTPUT_DIR/meta/module-status.tsv"
     EXECUTION_STATUS_FILE="$OUTPUT_DIR/meta/execution-status.tsv"
+    SCOPE_HOSTS_FILE="$OUTPUT_DIR/meta/scope.txt"
+    OUT_OF_SCOPE_FILE="$OUTPUT_DIR/meta/out-of-scope.tsv"
     : > "$LOG_FILE"
     printf 'VARS %s\nrun_id=%s\nstarted=%s\nmode=%s\njobs=%s\ntimeout=%s\nkeep_going=%s\nproxy_configured=%s\noutput_dir=%s\n' \
         "$VERSION" "$RUN_ID" "$(date -Is)" "$MODE" "$JOBS" "$TIMEOUT" "$KEEP_GOING" "$([[ -n "$PROXY" ]] && printf true || printf false)" "$OUTPUT_DIR" > "$RUN_FILE"
     printf 'tool\tavailability\tlocation\tdetail\n' > "$TOOL_STATUS_FILE"
     printf 'module\tfinished_at\tstatus\trc\tduration_seconds\n' > "$MODULE_STATUS_FILE"
     printf 'kind\tname\tstatus\trc\tduration_seconds\tdetail\n' > "$EXECUTION_STATUS_FILE"
+    : > "$SCOPE_HOSTS_FILE"
+    printf 'source\turl\taction\treason\n' > "$OUT_OF_SCOPE_FILE"
 }
 
 check_optional_tools() {
@@ -363,7 +397,222 @@ normalize_one() {
     line="${line%"${line##*[![:space:]]}"}"
     [[ -z "$line" || "$line" == \#* ]] && return 2
     [[ "$line" =~ ^https?://[^[:space:]]+$ ]] || return 1
+    extract_url_host "$line" >/dev/null || return 1
     printf '%s\n' "$line"
+}
+
+count_ipv6_side() {
+    local side="$1" part count=0 index
+    local -a parts=()
+    [[ -n "$side" ]] || { printf '0\n'; return 0; }
+    [[ "$side" != :* && "$side" != *: ]] || return 1
+    IFS=':' read -r -a parts <<< "$side"
+    for index in "${!parts[@]}"; do
+        part="${parts[$index]}"
+        if [[ "$part" == *.* ]]; then
+            (( index == ${#parts[@]} - 1 )) || return 1
+            valid_ipv4_literal "$part" || return 1
+            count=$((count + 2))
+        else
+            [[ "$part" =~ ^[0-9A-Fa-f]{1,4}$ ]] || return 1
+            count=$((count + 1))
+        fi
+    done
+    printf '%s\n' "$count"
+}
+
+valid_ipv6_literal() {
+    local value="$1" left right left_count right_count ipv4
+    [[ "$value" == *:* && "$value" != *:::* ]] || return 1
+    if [[ "$value" == *.* ]]; then
+        ipv4="${value##*:}"
+        valid_ipv4_literal "$ipv4" || return 1
+    fi
+    if [[ "$value" == *::* ]]; then
+        left="${value%%::*}"
+        right="${value#*::}"
+        [[ "$right" != *::* ]] || return 1
+        left_count="$(count_ipv6_side "$left")" || return 1
+        right_count="$(count_ipv6_side "$right")" || return 1
+        (( left_count + right_count < 8 ))
+    else
+        left_count="$(count_ipv6_side "$value")" || return 1
+        (( left_count == 8 ))
+    fi
+}
+
+valid_ipv4_literal() {
+    local value="$1" octet
+    local -a octets=()
+    IFS='.' read -r -a octets <<< "$value"
+    (( ${#octets[@]} == 4 )) || return 1
+    for octet in "${octets[@]}"; do
+        [[ "$octet" =~ ^(0|[1-9][0-9]{0,2})$ ]] || return 1
+        (( 10#$octet <= 255 )) || return 1
+    done
+}
+
+valid_dns_host() {
+    local host="$1" label
+    local -a labels=()
+    (( ${#host} <= 253 )) || return 1
+    [[ "$host" != *..* && "$host" != .* && "$host" != *. ]] || return 1
+    if [[ "$host" =~ ^[0-9.]+$ ]]; then
+        valid_ipv4_literal "$host"
+        return
+    fi
+    IFS='.' read -r -a labels <<< "$host"
+    for label in "${labels[@]}"; do
+        (( ${#label} >= 1 && ${#label} <= 63 )) || return 1
+        [[ "$label" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || return 1
+    done
+}
+
+parse_authority_host() {
+    local authority="$1" host port="" has_port=0
+    [[ -n "$authority" ]] || return 1
+    [[ "$authority" != *"\\"* && "$authority" != *"@"* && "$authority" != *"/"* && "$authority" != *"?"* && "$authority" != *"#"* ]] || return 1
+    if [[ "$authority" == \[* ]]; then
+        [[ "$authority" =~ ^\[([0-9A-Fa-f:.]+)\](:([0-9]+))?$ ]] || return 1
+        host="${BASH_REMATCH[1]}"
+        port="${BASH_REMATCH[3]:-}"
+    else
+        [[ "$authority" != *:*:* ]] || return 1
+        if [[ "$authority" == *:* ]]; then
+            has_port=1
+            host="${authority%%:*}"
+            port="${authority##*:}"
+        else
+            host="$authority"
+        fi
+    fi
+    host="${host,,}"
+    host="${host%.}"
+    [[ -n "$host" ]] || return 1
+    if (( has_port == 1 )) || [[ -n "$port" ]]; then
+        [[ "$port" =~ ^[0-9]+$ && ${#port} -le 5 ]] || return 1
+        (( 10#$port >= 1 && 10#$port <= 65535 )) || return 1
+    fi
+    if [[ "$host" == *:* ]]; then
+        valid_ipv6_literal "$host" || return 1
+    else
+        valid_dns_host "$host" || return 1
+    fi
+    printf '%s\n' "$host"
+}
+
+extract_url_host() {
+    local url="$1" authority
+    [[ "$url" =~ ^https?://[^[:space:]]+$ ]] || return 1
+    [[ "$url" != *"\\"* ]] || return 1
+    authority="${url#*://}"
+    authority="${authority%%[/?#]*}"
+    parse_authority_host "$authority"
+}
+
+normalize_scope_host() {
+    local value="$1" host
+    value="${value%$'\r'}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    [[ -z "$value" || "$value" == \#* ]] && return 2
+    if [[ "$value" =~ ^https?:// ]]; then
+        host="$(extract_url_host "$value")" || return 1
+    else
+        host="$(parse_authority_host "$value")" || return 1
+    fi
+    printf '%s\n' "$host"
+}
+
+host_in_scope() {
+    local host="${1,,}" base
+    [[ -n "${SCOPE_HOSTS[$host]+set}" ]] && return 0
+    if [[ "$INCLUDE_SUBDOMAINS" == 1 ]]; then
+        for base in "${!SCOPE_HOSTS[@]}"; do
+            [[ "$base" != *:* && ! "$base" =~ ^[0-9.]+$ ]] || continue
+            [[ "$host" == *."$base" ]] && return 0
+        done
+    fi
+    return 1
+}
+
+url_in_scope() {
+    local host
+    host="$(extract_url_host "$1")" || return 1
+    host_in_scope "$host"
+}
+
+record_out_of_scope() {
+    local source="$1" url="$2" action="$3" reason="$4" key
+    key="${action}"$'\t'"${url}"
+    [[ -n "${RECORDED_SCOPE_URLS[$key]+set}" ]] && return 0
+    RECORDED_SCOPE_URLS["$key"]=1
+    source="${source//$'\t'/ }"
+    url="${url//$'\t'/ }"
+    reason="${reason//$'\t'/ }"
+    printf '%s\t%s\t%s\t%s\n' "$source" "$url" "$action" "$reason" >> "$OUT_OF_SCOPE_FILE"
+}
+
+load_scope() {
+    local targets="$1" line host url rc
+    SCOPE_HOSTS=()
+    RECORDED_SCOPE_URLS=()
+    if [[ -n "$SCOPE_FILE" ]]; then
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            if host="$(normalize_scope_host "$line")"; then
+                SCOPE_HOSTS["$host"]=1
+            else
+                rc=$?
+                (( rc == 2 )) && continue
+                die "Entrada inválida no arquivo de escopo: $line"
+            fi
+        done < "$SCOPE_FILE"
+    else
+        while IFS= read -r url; do
+            [[ -n "$url" ]] || continue
+            host="$(extract_url_host "$url")" || die "Não foi possível extrair o host do alvo: $url"
+            SCOPE_HOSTS["$host"]=1
+        done < "$targets"
+    fi
+    (( ${#SCOPE_HOSTS[@]} > 0 )) || die "O escopo autorizado está vazio"
+    while IFS= read -r url; do
+        [[ -n "$url" ]] || continue
+        url_in_scope "$url" || die "Alvo fora do escopo autorizado: $url"
+    done < "$targets"
+    log INFO "Escopo carregado: ${#SCOPE_HOSTS[@]} host(s); subdomínios=$INCLUDE_SUBDOMAINS; exceção=$ALLOW_OUT_OF_SCOPE"
+}
+
+write_scope_metadata() {
+    local scope_source
+    scope_source="$([[ -n "$SCOPE_FILE" ]] && printf '%s' "$SCOPE_FILE" || printf 'targets')"
+    printf '%s\n' "${!SCOPE_HOSTS[@]}" | sort > "$SCOPE_HOSTS_FILE"
+    printf 'scope_source=%s\ninclude_subdomains=%s\nallow_out_of_scope=%s\n' \
+        "$scope_source" "$INCLUDE_SUBDOMAINS" "$ALLOW_OUT_OF_SCOPE" >> "$RUN_FILE"
+}
+
+filter_scoped_urls() {
+    local source="$1" input="$2" output="$3" line normalized host action
+    local filtered="$TMP_DIR/scope-filter.$RANDOM.$$"
+    : > "$filtered"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if ! normalized="$(normalize_one "$line")"; then
+            continue
+        fi
+        if url_in_scope "$normalized"; then
+            printf '%s\n' "$normalized" >> "$filtered"
+            continue
+        fi
+        host="$(extract_url_host "$normalized")" || continue
+        if [[ "$ALLOW_OUT_OF_SCOPE" == 1 ]]; then
+            action="allowed_override"
+            printf '%s\n' "$normalized" >> "$filtered"
+        else
+            action="blocked"
+        fi
+        record_out_of_scope "$source" "$normalized" "$action" "host ${host} fora do escopo autorizado"
+    done < "$input"
+    sort -u "$filtered" > "$output"
+    rm -f -- "$filtered"
 }
 
 normalize_targets() {
@@ -482,7 +731,14 @@ run_log4j_target() {
 }
 
 run_paramspider() {
-    local targets="$1" host
+    local targets="$1" url host hosts="$TMP_DIR/paramspider-hosts.txt"
+    : > "$hosts"
+    while IFS= read -r url; do
+        [[ -n "$url" ]] || continue
+        host="$(extract_url_host "$url")" || continue
+        printf '%s\n' "$host" >> "$hosts"
+    done < "$targets"
+    sort -u "$hosts" -o "$hosts"
     while IFS= read -r host; do
         [[ -n "$host" ]] || continue
         if [[ -f "$PARAMSPIDER" ]]; then
@@ -490,7 +746,7 @@ run_paramspider() {
         else
             paramspider -d "$host" --quiet
         fi
-    done < <(awk -F/ '{print $3}' "$targets" | sed 's/:.*//' | sort -u)
+    done < "$hosts"
 }
 
 run_xsstrike_all() {
@@ -515,20 +771,158 @@ run_bhedak() {
     bhedak "\"><svg/onload=alert(1)>*'/---+{{7*7}}" < "$1"
 }
 
+run_gf_to_file() {
+    local pattern="$1" input="$2" output="$3" rc
+    if gf "$pattern" < "$input" > "$output"; then
+        return 0
+    else
+        rc=$?
+    fi
+    if (( rc == 1 )); then
+        : > "$output"
+        return 0
+    fi
+    return "$rc"
+}
+
 run_bhedak_urldedupe() {
-    urldedupe -qs < "$1" | bhedak '\"><svg onload=confirm(1)>' | airixss -payload 'confirm(1)' | { grep -E -v 'Not' || true; }
+    local input="$1" dedupe_raw="$TMP_DIR/xss-urldedupe.raw" dedupe_scoped="$TMP_DIR/xss-urldedupe.scoped"
+    local bhedak_raw="$TMP_DIR/xss-bhedak.raw" bhedak_scoped="$TMP_DIR/xss-bhedak.scoped"
+    local result="$TMP_DIR/xss-bhedak.result" rc
+    if urldedupe -qs < "$input" > "$dedupe_raw"; then
+        :
+    else
+        rc=$?
+        return "$rc"
+    fi
+    filter_scoped_urls 'xss/urldedupe' "$dedupe_raw" "$dedupe_scoped"
+    [[ -s "$dedupe_scoped" ]] || return 0
+    if bhedak '\"><svg onload=confirm(1)>' < "$dedupe_scoped" > "$bhedak_raw"; then
+        :
+    else
+        rc=$?
+        return "$rc"
+    fi
+    filter_scoped_urls 'xss/bhedak' "$bhedak_raw" "$bhedak_scoped"
+    [[ -s "$bhedak_scoped" ]] || return 0
+    if airixss -payload 'confirm(1)' < "$bhedak_scoped" > "$result"; then
+        { grep -E -v 'Not' "$result" || true; }
+    else
+        rc=$?
+        return "$rc"
+    fi
+}
+
+run_hakrawler_scoped() {
+    if [[ "$INCLUDE_SUBDOMAINS" == 1 ]]; then
+        hakrawler -subs
+    else
+        hakrawler
+    fi
 }
 
 run_hakrawler_airixss() {
-    httpx -silent -threads "$JOBS" -timeout "$TIMEOUT" < "$1" | hakrawler -subs | { grep '=' || true; } | qsreplace '\"><svg onload=confirm(1)>' | airixss -payload 'confirm(1)' | { grep -E -v 'Not' || true; }
+    local input="$1" httpx_raw="$TMP_DIR/xss-hakrawler-httpx.raw" httpx_scoped="$TMP_DIR/xss-hakrawler-httpx.scoped"
+    local raw="$TMP_DIR/xss-hakrawler.raw" scoped="$TMP_DIR/xss-hakrawler.scoped"
+    local mutated="$TMP_DIR/xss-hakrawler-mutated.raw" filtered="$TMP_DIR/xss-hakrawler-mutated.scoped"
+    local result="$TMP_DIR/xss-hakrawler.result" rc
+    if httpx -silent -threads "$JOBS" -timeout "$TIMEOUT" < "$input" > "$httpx_raw"; then
+        :
+    else
+        rc=$?
+        return "$rc"
+    fi
+    filter_scoped_urls 'xss/hakrawler-httpx' "$httpx_raw" "$httpx_scoped"
+    [[ -s "$httpx_scoped" ]] || return 0
+    if run_hakrawler_scoped < "$httpx_scoped" > "$raw"; then
+        :
+    else
+        rc=$?
+        return "$rc"
+    fi
+    filter_scoped_urls 'xss/hakrawler' "$raw" "$scoped"
+    [[ -s "$scoped" ]] || return 0
+    if { grep '=' < "$scoped" || true; } | qsreplace '\"><svg onload=confirm(1)>' > "$mutated"; then
+        :
+    else
+        rc=$?
+        return "$rc"
+    fi
+    filter_scoped_urls 'xss/qsreplace' "$mutated" "$filtered"
+    [[ -s "$filtered" ]] || return 0
+    if airixss -payload 'confirm(1)' < "$filtered" > "$result"; then
+        { grep -E -v 'Not' "$result" || true; }
+    else
+        rc=$?
+        return "$rc"
+    fi
 }
 
 run_airixss() {
-    { gf xss < "$1" || true; } | uro | httpx -silent -threads "$JOBS" -timeout "$TIMEOUT" | qsreplace '\"><svg onload=confirm(1)>' | airixss -payload 'confirm(1)'
+    local input="$1" gf_raw="$TMP_DIR/xss-airixss-gf.raw" gf_scoped="$TMP_DIR/xss-airixss-gf.scoped"
+    local uro_raw="$TMP_DIR/xss-airixss-uro.raw" uro_scoped="$TMP_DIR/xss-airixss-uro.scoped"
+    local raw="$TMP_DIR/xss-httpx.raw" scoped="$TMP_DIR/xss-httpx.scoped"
+    local mutated="$TMP_DIR/xss-airixss-mutated.raw" filtered="$TMP_DIR/xss-airixss-mutated.scoped" rc
+    run_gf_to_file xss "$input" "$gf_raw" || return $?
+    filter_scoped_urls 'xss/gf' "$gf_raw" "$gf_scoped"
+    [[ -s "$gf_scoped" ]] || return 0
+    if uro < "$gf_scoped" > "$uro_raw"; then
+        :
+    else
+        rc=$?
+        return "$rc"
+    fi
+    filter_scoped_urls 'xss/uro' "$uro_raw" "$uro_scoped"
+    [[ -s "$uro_scoped" ]] || return 0
+    if httpx -silent -threads "$JOBS" -timeout "$TIMEOUT" < "$uro_scoped" > "$raw"; then
+        :
+    else
+        rc=$?
+        return "$rc"
+    fi
+    filter_scoped_urls 'xss/httpx' "$raw" "$scoped"
+    [[ -s "$scoped" ]] || return 0
+    if qsreplace '\"><svg onload=confirm(1)>' < "$scoped" > "$mutated"; then
+        :
+    else
+        rc=$?
+        return "$rc"
+    fi
+    filter_scoped_urls 'xss/qsreplace' "$mutated" "$filtered"
+    [[ -s "$filtered" ]] || return 0
+    airixss -payload 'confirm(1)' < "$filtered"
 }
 
 run_freq() {
-    { gf xss < "$1" || true; } | uro | qsreplace '\"><img src=x onerror=alert(1);>' | freq | { grep -E -v 'Not' || true; }
+    local input="$1" gf_raw="$TMP_DIR/xss-freq-gf.raw" gf_scoped="$TMP_DIR/xss-freq-gf.scoped"
+    local uro_raw="$TMP_DIR/xss-freq-uro.raw" uro_scoped="$TMP_DIR/xss-freq-uro.scoped"
+    local raw="$TMP_DIR/xss-freq.raw" scoped="$TMP_DIR/xss-freq.scoped"
+    local result="$TMP_DIR/xss-freq.result" rc
+    run_gf_to_file xss "$input" "$gf_raw" || return $?
+    filter_scoped_urls 'xss/freq-gf' "$gf_raw" "$gf_scoped"
+    [[ -s "$gf_scoped" ]] || return 0
+    if uro < "$gf_scoped" > "$uro_raw"; then
+        :
+    else
+        rc=$?
+        return "$rc"
+    fi
+    filter_scoped_urls 'xss/freq-uro' "$uro_raw" "$uro_scoped"
+    [[ -s "$uro_scoped" ]] || return 0
+    if qsreplace '\"><img src=x onerror=alert(1);>' < "$uro_scoped" > "$raw"; then
+        :
+    else
+        rc=$?
+        return "$rc"
+    fi
+    filter_scoped_urls 'xss/freq-input' "$raw" "$scoped"
+    [[ -s "$scoped" ]] || return 0
+    if freq < "$scoped" > "$result"; then
+        { grep -E -v 'Not' "$result" || true; }
+    else
+        rc=$?
+        return "$rc"
+    fi
 }
 
 run_xray() {
@@ -550,27 +944,48 @@ run_jaeles() {
 }
 
 run_sqli_mass() {
-    local input="$1" candidates="$TMP_DIR/sqli-candidates.txt"
+    local input="$1" candidates="$TMP_DIR/sqli-candidates.txt" candidates_raw="$TMP_DIR/sqli-candidates.raw"
+    local live_raw="$TMP_DIR/sqli-live.raw" live="$TMP_DIR/sqli-live.txt"
+    local gf_raw="$TMP_DIR/sqli-gf.raw" gf_scoped="$TMP_DIR/sqli-gf.scoped"
     : > "$candidates"
     if tool_available httpx; then
-        httpx -silent -l "$input" -threads "$JOBS" -timeout "$TIMEOUT" > "$TMP_DIR/sqli-live.txt" || return $?
+        httpx -silent -l "$input" -threads "$JOBS" -timeout "$TIMEOUT" > "$live_raw" || return $?
+        filter_scoped_urls 'sqli/httpx' "$live_raw" "$live"
     else
-        cp -- "$input" "$TMP_DIR/sqli-live.txt"
+        cp -- "$input" "$live"
     fi
+    run_gf_to_file sqli "$live" "$gf_raw" || return $?
+    filter_scoped_urls 'sqli/gf' "$gf_raw" "$gf_scoped"
+    [[ -s "$gf_scoped" ]] || return 0
     if tool_available anew; then
-        { gf sqli < "$TMP_DIR/sqli-live.txt" || true; } | anew > "$candidates" || return $?
+        anew < "$gf_scoped" > "$candidates_raw" || return $?
     else
-        { gf sqli < "$TMP_DIR/sqli-live.txt" || true; } | sort -u > "$candidates" || return $?
+        sort -u "$gf_scoped" > "$candidates_raw" || return $?
     fi
+    filter_scoped_urls 'sqli/candidates' "$candidates_raw" "$candidates"
     [[ -s "$candidates" ]] || return 0
     sqlmap -m "$candidates" --batch --random-agent --level 1 --timeout "$TIMEOUT" --output-dir="$OUTPUT_DIR/sqli/sqlmap"
 }
 
 run_sqli_qsreplace() {
     local input="$1" responses="$OUTPUT_DIR/sqli/output" probe="$TMP_DIR/sqli-probe.txt"
+    local raw="$TMP_DIR/sqli-qsreplace.raw" scoped="$TMP_DIR/sqli-qsreplace.scoped" rc
     mkdir -p -- "$responses"
     : > "$probe"
-    { grep '=' < "$input" || true; } | qsreplace "' OR '1" | httpx -silent -threads "$JOBS" -timeout "$TIMEOUT" -store-response-dir "$responses" > "$probe"
+    if { grep '=' < "$input" || true; } | qsreplace "' OR '1" > "$raw"; then
+        :
+    else
+        rc=$?
+        return "$rc"
+    fi
+    filter_scoped_urls 'sqli/qsreplace' "$raw" "$scoped"
+    [[ -s "$scoped" ]] || { printf 'Nenhum candidato SQLi dentro do escopo\n'; return 0; }
+    if httpx -silent -threads "$JOBS" -timeout "$TIMEOUT" -store-response-dir "$responses" < "$scoped" > "$probe"; then
+        :
+    else
+        rc=$?
+        return "$rc"
+    fi
     if grep -R -E -q 'syntax|mysql' "$responses" 2>/dev/null; then
         printf 'TARGET potencialmente explorável\n'
     else
@@ -582,10 +997,15 @@ recon_module() {
     local targets="$1" live="$OUTPUT_DIR/recon/live.txt" gau_file="$OUTPUT_DIR/recon/gau.txt"
     local urls_file="$OUTPUT_DIR/recon/urls.txt" crawl_file="$OUTPUT_DIR/recon/crawl.txt"
     local candidates="$OUTPUT_DIR/recon/candidates.txt"
+    local live_raw="$TMP_DIR/recon-live.raw" gau_raw="$TMP_DIR/recon-gau.raw"
+    local urls_raw="$TMP_DIR/recon-urls.raw" crawl_raw="$TMP_DIR/recon-crawl.raw"
+    local candidates_raw="$TMP_DIR/recon-candidates.raw" paramspider_raw="$TMP_DIR/paramspider.raw"
     module_start
     : > "$live"; : > "$gau_file"; : > "$urls_file"; : > "$crawl_file"; : > "$candidates"
+    : > "$live_raw"; : > "$gau_raw"; : > "$urls_raw"; : > "$crawl_raw"; : > "$candidates_raw"
     if tool_available httpx; then
-        step httpx 'httpx (alvos ativos)' httpx -silent -l "$targets" -threads "$JOBS" -timeout "$TIMEOUT" > "$live"
+        step httpx 'httpx (alvos ativos)' httpx -silent -l "$targets" -threads "$JOBS" -timeout "$TIMEOUT" > "$live_raw"
+        filter_scoped_urls 'httpx' "$live_raw" "$live"
     else
         cp -- "$targets" "$live"
         CURRENT_MODULE_RAN=1
@@ -593,12 +1013,14 @@ recon_module() {
         log WARN 'httpx indisponível; usando os alvos originais como fallback'
     fi
     if tool_available gau; then
-        step gau 'gau (URLs históricas)' gau --threads "$JOBS" --timeout "$TIMEOUT" < "$live" > "$gau_file"
+        step gau 'gau (URLs históricas)' gau --threads "$JOBS" --timeout "$TIMEOUT" < "$live" > "$gau_raw"
+        filter_scoped_urls 'gau' "$gau_raw" "$gau_file"
     else
         record_execution tool 'gau (URLs históricas)' skipped 0 0 'gau ausente'
     fi
     if tool_available uro && [[ -s "$gau_file" ]]; then
-        step uro 'uro (normalização de URLs)' uro < "$gau_file" > "$urls_file"
+        step uro 'uro (normalização de URLs)' uro < "$gau_file" > "$urls_raw"
+        filter_scoped_urls 'uro' "$urls_raw" "$urls_file"
     elif [[ -s "$gau_file" ]]; then
         cp -- "$gau_file" "$urls_file"
         record_execution fallback 'uro (normalização de URLs)' fallback 0 0 'uro ausente; URLs históricas preservadas'
@@ -606,17 +1028,20 @@ recon_module() {
         record_execution tool 'uro (normalização de URLs)' skipped 0 0 'sem entrada ou uro ausente'
     fi
     if tool_available hakrawler; then
-        step hakrawler 'hakrawler (crawling)' hakrawler -subs < "$live" > "$crawl_file"
+        step hakrawler 'hakrawler (crawling)' run_hakrawler_scoped < "$live" > "$crawl_raw"
+        filter_scoped_urls 'hakrawler' "$crawl_raw" "$crawl_file"
     else
         record_execution tool 'hakrawler (crawling)' skipped 0 0 'hakrawler ausente'
     fi
-    awk '/^https?:\/\// {print}' "$live" "$urls_file" "$crawl_file" 2>/dev/null | sort -u > "$candidates"
+    awk '/^https?:\/\// {print}' "$live" "$urls_file" "$crawl_file" 2>/dev/null | sort -u > "$candidates_raw"
+    filter_scoped_urls 'recon/candidates.txt' "$candidates_raw" "$candidates"
     if [[ -s "$candidates" ]]; then
         record_execution derived 'recon/candidates.txt' generated 0 0 'URLs HTTP(S) deduplicadas'
         CURRENT_MODULE_RAN=1
     fi
     if tool_available paramspider; then
-        step paramspider 'ParamSpider (parâmetros)' run_paramspider "$targets" > "$OUTPUT_DIR/misc/paramspider.txt"
+        step paramspider 'ParamSpider (parâmetros)' run_paramspider "$targets" > "$paramspider_raw"
+        filter_scoped_urls 'paramspider' "$paramspider_raw" "$OUTPUT_DIR/misc/paramspider.txt"
     else
         record_execution tool 'ParamSpider (parâmetros)' skipped 0 0 'paramspider ausente'
     fi
@@ -776,6 +1201,9 @@ main() {
             -t) [[ $# -ge 2 ]] || die "-t requer segundos"; TIMEOUT="$2"; shift 2 ;;
             -p) [[ $# -ge 2 ]] || die "-p requer um proxy"; PROXY="$2"; shift 2 ;;
             -k) [[ $# -ge 2 ]] || die "-k requer uma chave"; KNOXSS_API_KEY="$2"; shift 2 ;;
+            --scope-file) [[ $# -ge 2 ]] || die "--scope-file requer um arquivo"; SCOPE_FILE="$2"; shift 2 ;;
+            --include-subdomains) INCLUDE_SUBDOMAINS=1; shift ;;
+            --allow-out-of-scope) ALLOW_OUT_OF_SCOPE=1; shift ;;
             --keep-going) KEEP_GOING=1; shift ;;
             -h|--help) usage; exit 0 ;;
             -v|--version) version; exit 0 ;;
@@ -790,16 +1218,19 @@ main() {
         PATH="$BIN_DIR:$PATH"
         export PATH
     fi
-    setup_output
-    configure_proxy
-    check_optional_tools
+    setup_temp
     local targets="$TMP_DIR/targets.txt"
     if [[ -n "$INPUT_FILE" ]]; then
         normalize_targets "$INPUT_FILE" "$targets"
     else
         normalize_targets "$TARGET_URL" "$targets"
     fi
+    load_scope "$targets"
+    setup_output
+    write_scope_metadata
+    configure_proxy
     cp -- "$targets" "$OUTPUT_DIR/meta/targets.txt"
+    check_optional_tools
     log INFO "Alvos válidos: $(wc -l < "$targets")"
     log INFO "Modo: ${MODE}; concorrência: ${JOBS}; timeout: ${TIMEOUT}s"
     run_mode "$targets"

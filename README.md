@@ -1,16 +1,16 @@
 # VARS — Vulnerability Automated Recon Suite
 
-**VARS** é um script Bash para automatizar reconhecimento e triagem de segurança web em ativos próprios ou explicitamente autorizados. A versão atual preserva as opções de linha de comando da série 2.x e acrescenta isolamento de resultados, inventário de ferramentas, status por etapa, fallbacks e metadados de execução.
+**VARS** é um script Bash para automatizar reconhecimento e triagem de segurança web em ativos próprios ou explicitamente autorizados. A versão atual preserva as opções de linha de comando da série 2.x e acrescenta isolamento de resultados, controle de escopo, inventário de ferramentas, status por etapa, fallbacks e metadados de execução.
 
 > **Uso autorizado somente.** O operador é responsável por obter autorização, respeitar escopo, limites de taxa e legislação aplicável. O projeto não deve ser usado contra sistemas de terceiros sem permissão explícita.
 
 ## Características principais
 
-VARS aceita uma URL individual ou um arquivo de alvos. As entradas são filtradas para URLs HTTP(S), normalizadas e deduplicadas antes da execução. O pipeline é modular e pode executar reconhecimento, XSS, SQL injection, Nuclei, Log4j ou o fluxo completo.
+VARS aceita uma URL individual ou um arquivo de alvos. As entradas são filtradas para URLs HTTP(S), normalizadas e deduplicadas antes da execução. Por padrão, somente os hosts informados inicialmente permanecem no pipeline: URLs de outros hosts descobertas por ferramentas de reconhecimento são bloqueadas e auditadas. O pipeline é modular e pode executar reconhecimento, XSS, SQL injection, Nuclei, Log4j ou o fluxo completo.
 
 As ferramentas opcionais são detectadas individualmente. A ausência de uma ferramenta não interrompe automaticamente o pipeline: a execução registra a ferramenta como indisponível e utiliza um fallback seguro quando esse fallback mantém o significado do resultado. Falhas de ferramentas são registradas com código de retorno e duração.
 
-Cada execução cria metadados, logs e arquivos de status. Se o diretório solicitado já tiver conteúdo, VARS cria uma subpasta `run-<timestamp>-<pid>` para não sobrescrever resultados anteriores. A reutilização explícita de um diretório existente exige `VARS_OUTPUT_REUSE=1`.
+Cada execução cria metadados, logs, arquivos de status e um registro das URLs encontradas fora do escopo. Se o diretório solicitado já tiver conteúdo, VARS cria uma subpasta `run-<timestamp>-<pid>` para não sobrescrever resultados anteriores. A reutilização explícita de um diretório existente exige `VARS_OUTPUT_REUSE=1`.
 
 ## Requisitos
 
@@ -30,7 +30,7 @@ Clone o repositório e torne o script executável:
 ```bash
 git clone https://github.com/404xploit/vars.git
 cd vars
-chmod +x vars.sh tests/test_cli.sh tests/test_runtime.sh
+chmod +x vars.sh tests/*.sh
 ./vars.sh --help
 ```
 
@@ -43,6 +43,7 @@ Instale apenas as ferramentas compatíveis com o seu ambiente e deixe-as no `PAT
 ./vars.sh -f targets.txt -m xss -o results
 ./vars.sh -f targets.txt -m sqli -j 10 -t 30
 ./vars.sh -f targets.txt -p http://127.0.0.1:8080 --keep-going
+./vars.sh -f targets.txt --scope-file scope.txt --include-subdomains
 KNOXSS_API_KEY="sua-chave" ./vars.sh -f targets.txt -m xss
 ```
 
@@ -60,6 +61,9 @@ Execute scanners apenas sobre alvos autorizados. O exemplo acima usa `example.co
 | `-t <seg>` | Define o timeout em segundos para integrações que aceitam esse parâmetro. O padrão é `15`. |
 | `-p <proxy>` | Define um proxy `http://` ou `https://` e exporta as variantes maiúsculas e minúsculas usadas por clientes HTTP. O valor não é gravado nos logs. |
 | `-k <chave>` | Define a chave da API do Knoxss para a execução atual. Prefira `KNOXSS_API_KEY`. A chave nunca é impressa. |
+| `--scope-file <arquivo>` | Usa uma lista autoritativa de hosts ou URLs autorizados, um por linha. Os alvos iniciais também precisam pertencer a esse escopo. |
+| `--include-subdomains` | Autoriza subdomínios dos hosts listados no escopo. Sem esta opção, a correspondência de host é exata. |
+| `--allow-out-of-scope` | Mantém URLs descobertas fora do escopo no pipeline e registra cada exceção como `allowed_override`. Use somente quando a autorização cobrir esses ativos. |
 | `--keep-going` | Continua para os módulos seguintes após falha de um módulo. O status final continua sendo não zero quando houve falha. |
 | `-h`, `--help` | Exibe a ajuda sem banner e sem executar validação de alvo. |
 | `-v`, `--version` | Exibe a versão sem banner. |
@@ -122,6 +126,9 @@ A precedência é **CLI > variáveis de ambiente > valores padrão**. As variáv
 | `VARS_PROXY` | vazio | Proxy padrão. |
 | `VARS_KEEP_GOING` | `0` | Use `1` para o equivalente padrão de `--keep-going`. |
 | `VARS_OUTPUT_REUSE` | `0` | Use `1` para permitir reutilização explícita de um diretório não vazio. |
+| `VARS_SCOPE_FILE` | vazio | Arquivo autoritativo de hosts ou URLs autorizados. Sem ele, o escopo é derivado dos alvos iniciais. |
+| `VARS_INCLUDE_SUBDOMAINS` | `0` | Use `1` para incluir subdomínios dos hosts autorizados. |
+| `VARS_ALLOW_OUT_OF_SCOPE` | `0` | Use `1` para manter URLs externas descobertas, sempre com registro de auditoria. |
 | `VARS_TOOLS_DIR` | `~/.local/share/vars/tools` | Raiz dos recursos mantidos fora do `PATH`. |
 | `VARS_BIN_DIR` | `~/.local/bin` | Diretório de binários adicionado ao início do `PATH` se existir. |
 | `VARS_PYTHON` | `python3` | Interpretador usado pelos scripts Python. |
@@ -133,6 +140,23 @@ A precedência é **CLI > variáveis de ambiente > valores padrão**. As variáv
 | `KNOXSS_API_KEY` | vazio | Chave usada pela integração Knoxss. |
 
 Não coloque chaves em arquivos versionados. Para reduzir exposição, o log grava apenas que a integração Knoxss foi habilitada ou ignorada; ele não grava a chave nem o valor do proxy. Valores de ambiente usados como caminhos, alvos, proxy ou credenciais são rejeitados quando contêm caracteres de controle. O processo usa `umask 077`, e o diretório de metadados da execução recebe permissões `700`.
+
+## Controle de escopo autorizado
+
+Sem `--scope-file`, o VARS extrai os hosts das URLs fornecidas por `-u` ou `-f` e usa correspondência exata. Uma execução iniciada com `https://app.example.com`, por exemplo, não autoriza automaticamente `api.example.com` nem `cdn.example.com`.
+
+Use `--include-subdomains` quando a autorização abranger os subdomínios dos hosts-base. Para representar um programa com escopo mais amplo ou vários domínios, forneça `--scope-file`:
+
+```text
+# scope.txt
+example.com
+https://example.org/program
+api.example.net:8443
+```
+
+Linhas vazias e comentários iniciados por `#` são ignorados. Quando o arquivo é usado, ele se torna autoritativo: um alvo inicial fora dele encerra a execução antes dos scanners e antes da criação do diretório de resultados. Portas não alteram a identidade do host para a verificação de escopo. URLs com userinfo, barra invertida, authority vazia, porta inválida, IPv6 malformado ou host DNS inválido são rejeitadas para evitar diferenças de interpretação entre ferramentas.
+
+As saídas de `httpx`, `gau`, `uro`, `hakrawler` e ParamSpider passam pelo filtro antes de alimentar scanners ou serem persistidas. O próprio `hakrawler` só recebe `-subs` quando `--include-subdomains` está ativo. As cadeias internas de XSS e SQLi reaplicam o controle após ferramentas que podem produzir ou transformar URLs e preservam códigos de falha dos scanners. Cada URL externa única é gravada em `meta/out-of-scope.tsv`, com sua primeira origem, ação e motivo. `--allow-out-of-scope` é uma exceção explícita e auditável; não deve ser usada para ampliar uma autorização inexistente.
 
 ## Proxy, timeout e concorrência
 
@@ -165,10 +189,12 @@ vars_results/
     ├── summary.txt
     ├── tool-status.tsv
     ├── module-status.tsv
-    └── execution-status.tsv
+    ├── execution-status.tsv
+    ├── scope.txt
+    └── out-of-scope.tsv
 ```
 
-Os arquivos TSV têm cabeçalho e podem ser processados por ferramentas Unix. `tool-status.tsv` registra disponibilidade e localização. `execution-status.tsv` registra etapas executadas, ignoradas ou falhas, com código de retorno e duração. `module-status.tsv` registra o estado de cada módulo. `summary.txt` reúne os metadados e as contagens finais.
+Os arquivos TSV têm cabeçalho e podem ser processados por ferramentas Unix. `tool-status.tsv` registra disponibilidade e localização. `execution-status.tsv` registra etapas executadas, ignoradas ou falhas, com código de retorno e duração. `module-status.tsv` registra o estado de cada módulo. `scope.txt` contém os hosts autorizados normalizados, e `out-of-scope.tsv` registra URLs bloqueadas ou liberadas por exceção. `summary.txt` reúne os metadados e as contagens finais.
 
 ## Tratamento de falhas e códigos de saída
 
@@ -192,12 +218,13 @@ bash tests/test_cli.sh
 bash tests/test_runtime.sh
 bash tests/test_inventory.sh
 bash tests/test_pipeline.sh
-shellcheck -x vars.sh tests/test_cli.sh tests/test_runtime.sh tests/test_inventory.sh tests/test_pipeline.sh
+bash tests/test_scope.sh
+shellcheck -x vars.sh tests/test_cli.sh tests/test_runtime.sh tests/test_inventory.sh tests/test_pipeline.sh tests/test_scope.sh
 ```
 
-A suíte cobre parsing de ajuda e versão, rejeição de opções inválidas, validação de URL, deduplicação, criação de metadados, isolamento de saída, precedência CLI sobre ambiente, continuidade após falha, preservação do status final não zero, um inventário explícito das ferramentas, módulos e opções da CLI e um smoke test do pipeline completo com stubs locais. Nenhum teste dispara scanners contra um sistema real.
+A suíte cobre parsing de ajuda e versão, rejeição de opções inválidas, validação estrita de URL, deduplicação, criação de metadados, isolamento de saída, precedência CLI sobre ambiente, continuidade após falha, preservação do status final não zero, bloqueio de hosts externos, proteção contra hosts parecidos e parsing ambíguo, inclusão explícita de subdomínios, arquivo autoritativo de escopo, IPv6, exceção auditável sem duplicatas, filtragem antes do Airixss, inventário das ferramentas e um smoke test do pipeline completo com stubs locais. Nenhum teste dispara scanners contra um sistema real.
 
-O repositório também possui uma workflow de GitHub Actions em `.github/workflows/ci.yml`. Cada push para `main` e cada pull request executa a validação de sintaxe, os testes, o inventário, o smoke test e o ShellCheck em um runner Ubuntu.
+O repositório também possui uma workflow de GitHub Actions em `.github/workflows/ci.yml`. Cada push para `main` e cada pull request executa a validação de sintaxe, os testes de runtime, inventário, pipeline e escopo, além do ShellCheck em um runner Ubuntu.
 
 ## Troubleshooting
 

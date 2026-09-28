@@ -22,10 +22,13 @@ assert_not_contains() {
 
 help_output="$(bash "$SCRIPT" --help)"
 assert_contains "$help_output" "Uso: $SCRIPT [opções]" "help exibe uso"
+assert_contains "$help_output" "--scope-file" "help exibe arquivo de escopo"
+assert_contains "$help_output" "--include-subdomains" "help exibe inclusão de subdomínios"
+assert_contains "$help_output" "--allow-out-of-scope" "help exibe exceção de escopo"
 assert_not_contains "$help_output" "feito por 0x404xploit" "help não exibe banner"
 
 version_output="$(bash "$SCRIPT" --version)"
-assert_contains "$version_output" "VARS 2.2.0" "version exibe versão"
+assert_contains "$version_output" "VARS 2.3.0" "version exibe versão"
 assert_not_contains "$version_output" "feito por 0x404xploit" "version não exibe banner"
 
 if bash "$SCRIPT" --invalid >/dev/null 2>&1; then
