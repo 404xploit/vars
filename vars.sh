@@ -346,16 +346,40 @@ setup_temp() {
     chmod 700 -- "$TMP_DIR"
 }
 
+reject_output_symlink() {
+    local path="$1"
+    [[ ! -L "$path" ]] || die "Caminho de saída não pode ser link simbólico: $path"
+}
+
+validate_output_paths() {
+    local path
+    reject_output_symlink "$OUTPUT_DIR"
+    for path in recon xss sqli log4j nuclei misc meta; do
+        reject_output_symlink "$OUTPUT_DIR/$path"
+        if [[ -e "$OUTPUT_DIR/$path" && ! -d "$OUTPUT_DIR/$path" ]]; then
+            die "Caminho de saída deve ser um diretório: $OUTPUT_DIR/$path"
+        fi
+    done
+    for path in vars.log run.txt summary.txt tool-status.tsv module-status.tsv execution-status.tsv scope.txt out-of-scope.tsv; do
+        reject_output_symlink "$OUTPUT_DIR/meta/$path"
+        if [[ -e "$OUTPUT_DIR/meta/$path" && ! -f "$OUTPUT_DIR/meta/$path" ]]; then
+            die "Metadado de saída deve ser um arquivo regular: $OUTPUT_DIR/meta/$path"
+        fi
+    done
+}
+
 setup_output() {
     if [[ -e "$OUTPUT_DIR" && ! -d "$OUTPUT_DIR" ]]; then
         die "O caminho de saída existe e não é um diretório: $OUTPUT_DIR"
     fi
-    [[ ! -L "$OUTPUT_DIR" ]] || die "O diretório de saída não pode ser um link simbólico: $OUTPUT_DIR"
+    validate_output_paths
     if [[ -d "$OUTPUT_DIR" && "$OUTPUT_REUSE" != 1 && -n "$(find "$OUTPUT_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
         OUTPUT_DIR="${OUTPUT_DIR%/}/run-${RUN_ID}"
         log WARN "O diretório de saída não estava vazio; usando execução isolada: $OUTPUT_DIR"
     fi
+    validate_output_paths
     mkdir -p -- "$OUTPUT_DIR"/{recon,xss,sqli,log4j,nuclei,misc,meta}
+    validate_output_paths
     chmod 700 -- "$OUTPUT_DIR/meta"
     LOG_FILE="$OUTPUT_DIR/meta/vars.log"
     RUN_FILE="$OUTPUT_DIR/meta/run.txt"
@@ -372,7 +396,7 @@ setup_output() {
     printf 'module\tfinished_at\tstatus\trc\tduration_seconds\n' > "$MODULE_STATUS_FILE"
     printf 'kind\tname\tstatus\trc\tduration_seconds\tdetail\n' > "$EXECUTION_STATUS_FILE"
     : > "$SCOPE_HOSTS_FILE"
-    printf 'source\turl\taction\treason\n' > "$OUT_OF_SCOPE_FILE"
+    printf 'source\turl\taction\treason\n' > "$OUT_OF_SCOPE_FILE'
 }
 
 check_optional_tools() {
