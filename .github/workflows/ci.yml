@@ -27,7 +27,7 @@ jobs:
       - name: Validate syntax
         run: |
           bash -n vars.sh
-          bash -n tests/test_cli.sh tests/test_runtime.sh tests/test_inventory.sh tests/test_pipeline.sh tests/test_scope.sh, tests/test_output_symlinks.sh
+          bash -n tests/test_cli.sh tests/test_runtime.sh tests/test_inventory.sh tests/test_pipeline.sh tests/test_scope.sh tests/test_output_symlinks.sh
 
       - name: Run tests
         run: |
@@ -40,4 +40,4 @@ jobs:
 
       - name: Run ShellCheck
         run: |
-          shellcheck -x vars.sh tests/test_cli.sh tests/test_runtime.sh tests/test_inventory.sh tests/test_pipeline.sh tests/test_scope.sh, tests/test_output_symlinks.sh
+          shellcheck -x vars.sh tests/test_cli.sh tests/test_runtime.sh tests/test_inventory.sh tests/test_pipeline.sh tests/test_scope.sh tests/test_output_symlinks.sh
