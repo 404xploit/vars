@@ -30,6 +30,13 @@ ln -s "$TEST_DIR/root-target" "$TEST_DIR/root-link"
 expect_rejected "$TEST_DIR/root-link" "diretório raiz simbólico"
 [[ "$(cat "$TEST_DIR/root-target/sentinel")" == "preserve-me" ]] || fail "arquivo externo foi alterado"
 
+# A symlink in a parent component must not redirect the output directory.
+mkdir -p "$TEST_DIR/parent-target"
+printf 'preserve-me\\n' > "$TEST_DIR/parent-target/sentinel"
+ln -s "$TEST_DIR/parent-target" "$TEST_DIR/parent-link"
+expect_rejected "$TEST_DIR/parent-link/output" "componente pai simbólico"
+[[ "$(cat "$TEST_DIR/parent-target/sentinel")" == "preserve-me" ]] || fail "link no diretório-pai alterou destino"
+
 # Existing internal output directories must not be followed.
 mkdir -p "$TEST_DIR/internal-target"
 printf 'preserve-me\n' > "$TEST_DIR/internal-target/sentinel"
