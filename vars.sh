@@ -346,8 +346,23 @@ setup_temp() {
     chmod 700 -- "$TMP_DIR"
 }
 
+# Reject symlinks in every existing component of the output path. Checking only
+# OUTPUT_DIR itself is insufficient when one of its parents redirects writes.
+reject_symlink_ancestors() {
+    local path="$1" component candidate=""
+    local -a components=()
+    [[ "$path" == /* ]] || path="$PWD/$path"
+    IFS='/' read -r -a components <<< "$path"
+    for component in "${components[@]}"; do
+        [[ -z "$component" || "$component" == "." ]] && continue
+        candidate="${candidate}/${component}"
+        [[ ! -L "$candidate" ]] || die "Componente do caminho de saída não pode ser link simbólico: $candidate"
+    done
+}
+
 setup_output() {
     local path
+    reject_symlink_ancestors "$OUTPUT_DIR"
     if [[ -e "$OUTPUT_DIR" && ! -d "$OUTPUT_DIR" ]]; then
         die "O caminho de saída existe e não é um diretório: $OUTPUT_DIR"
     fi
@@ -368,6 +383,7 @@ setup_output() {
         OUTPUT_DIR="${OUTPUT_DIR%/}/run-${RUN_ID}"
         log WARN "O diretório de saída não estava vazio; usando execução isolada: $OUTPUT_DIR"
     fi
+    reject_symlink_ancestors "$OUTPUT_DIR"
     [[ ! -L "$OUTPUT_DIR" ]] || die "O diretório de saída não pode ser um link simbólico: $OUTPUT_DIR"
     mkdir -p -- "$OUTPUT_DIR"/{recon,xss,sqli,log4j,nuclei,misc,meta}
     for path in recon xss sqli log4j nuclei misc meta; do
