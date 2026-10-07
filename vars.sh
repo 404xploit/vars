@@ -349,7 +349,7 @@ setup_temp() {
 # Reject symlinks in every existing component of the output path. Checking only
 # OUTPUT_DIR itself is insufficient when one of its parents redirects writes.
 reject_symlink_ancestors() {
-    local path="$1" existing="$1" canonical
+    local path="$1" existing canonical
     [[ "$path" == /* ]] || path="$PWD/$path"
     existing="$path"
     while [[ ! -e "$existing" && ! -L "$existing" && "$existing" != "/" ]]; do
