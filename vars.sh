@@ -351,9 +351,10 @@ setup_temp() {
 reject_symlink_ancestors() {
     local path="$1" parent
     [[ "$path" == /* ]] || path="$PWD/$path"
-    while [[ "$path" != "/" && "$path" != "." ]]; do
+    while [[ "$path" != "/" ]]; do
         [[ ! -L "$path" ]] || die "Componente do caminho de saída não pode ser link simbólico: $path"
-        parent="$(dirname -- "$path")"
+        parent="${path%/*}"
+        [[ -n "$parent" ]] || parent="/"
         [[ "$parent" == "$path" ]] && break
         path="$parent"
     done
