@@ -349,14 +349,13 @@ setup_temp() {
 # Reject symlinks in every existing component of the output path. Checking only
 # OUTPUT_DIR itself is insufficient when one of its parents redirects writes.
 reject_symlink_ancestors() {
-    local path="$1" component candidate=""
-    local -a components=()
+    local path="$1" parent
     [[ "$path" == /* ]] || path="$PWD/$path"
-    IFS='/' read -r -a components <<< "$path"
-    for component in "${components[@]}"; do
-        [[ -z "$component" || "$component" == "." ]] && continue
-        candidate="${candidate}/${component}"
-        [[ ! -L "$candidate" ]] || die "Componente do caminho de saída não pode ser link simbólico: $candidate"
+    while [[ "$path" != "/" && "$path" != "." ]]; do
+        [[ ! -L "$path" ]] || die "Componente do caminho de saída não pode ser link simbólico: $path"
+        parent="$(dirname -- "$path")"
+        [[ "$parent" == "$path" ]] && break
+        path="$parent"
     done
 }
 
