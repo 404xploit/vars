@@ -298,7 +298,7 @@ record_module() {
 
 check_runtime() {
     local dep
-    for dep in awk grep sed sort mktemp xargs curl git date mkdir cp rm wc find; do
+    for dep in awk grep sed sort mktemp xargs curl git date mkdir cp rm wc find realpath; do
         require_cmd "$dep"
     done
     [[ "$JOBS" =~ ^[1-9][0-9]*$ ]] || die "-j deve ser um inteiro positivo"
@@ -349,15 +349,16 @@ setup_temp() {
 # Reject symlinks in every existing component of the output path. Checking only
 # OUTPUT_DIR itself is insufficient when one of its parents redirects writes.
 reject_symlink_ancestors() {
-    local path="$1" parent
+    local path="$1" existing="$1" canonical
     [[ "$path" == /* ]] || path="$PWD/$path"
-    while [[ "$path" != "/" ]]; do
-        [[ ! -L "$path" ]] || die "Componente do caminho de saída não pode ser link simbólico: $path"
-        parent="${path%/*}"
-        [[ -n "$parent" ]] || parent="/"
-        [[ "$parent" == "$path" ]] && break
-        path="$parent"
+    existing="$path"
+    while [[ ! -e "$existing" && ! -L "$existing" && "$existing" != "/" ]]; do
+        existing="${existing%/*}"
+        [[ -n "$existing" ]] || existing="/"
     done
+    [[ ! -L "$existing" ]] || die "Componente do caminho de saída não pode ser link simbólico: $existing"
+    canonical="$(realpath -- "$existing")" || die "Não foi possível resolver o caminho de saída: $existing"
+    [[ "$canonical" == "$existing" ]] || die "Componente do caminho de saída resolve para outro destino: $existing -> $canonical"
 }
 
 setup_output() {
