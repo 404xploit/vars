@@ -103,8 +103,7 @@ assert_contains "$KEEP_OUT/meta/module-status.tsv" $'xss\t'
 assert_contains "$KEEP_OUT/meta/execution-status.tsv" $'httpx (alvos ativos)\tfailed\t7'
 
 # The run metadata should identify the selected mode and a unique run.
-assert_contains "$RECON_OUT/meta/run.txt" 
-mode=recon'
+assert_contains "$RECON_OUT/meta/run.txt" 'mode=recon'
 assert_contains "$RECON_OUT/meta/run.txt" 'run_id='
 assert_contains "$RECON_OUT/meta/summary.txt" 'started='
 assert_contains "$RECON_OUT/meta/summary.txt" 'finished='
