@@ -56,4 +56,12 @@ grep -F $'log4j-scan\tavailable' "$OUT/meta/tool-status.tsv" >/dev/null || fail 
 grep -F $'extended\t' "$OUT/meta/module-status.tsv" >/dev/null || fail "módulo extended não foi executado"
 grep -F $'exit_status=0' "$OUT/meta/summary.txt" >/dev/null || fail "full pipeline terminou com status inesperado"
 
+# Machine-readable metadata must keep stable headers for downstream tooling.
+grep -Fx 
+kind\tname\tstatus\trc\tduration_seconds\tdetail' "$OUT/meta/execution-status.tsv" >/dev/null || fail "cabeçalho de execution-status inválido"
+grep -Fx 
+module\tfinished_at\tstatus\trc\tduration_seconds' "$OUT/meta/module-status.tsv" >/dev/null || fail "cabeçalho de module-status inválido"
+grep -Fx 
+tool\tavailability\tlocation\tdetail' "$OUT/meta/tool-status.tsv" >/dev/null || fail "cabeçalho de tool-status inválido"
+
 printf 'OK: pipeline smoke\n'
