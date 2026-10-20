@@ -397,6 +397,3 @@ done
 grep -Fx $'source\turl\taction\treason' "$DEFAULT_OUT/meta/out-of-scope.tsv" >/dev/null || fail "cabeçalho de auditoria de escopo inválido"
 
 printf 'OK: scope enforcement\n'
-source\turl\taction\treason' "$DEFAULT_OUT/meta/out-of-scope.tsv" >/dev/null || fail "cabeçalho de auditoria de escopo inválido"
-
-printf 'OK: scope enforcement\n'
