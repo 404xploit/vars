@@ -47,5 +47,6 @@ expect_invalid -u https://example.test -m invalid
 expect_invalid -u https://example.test -j 0
 expect_invalid -u https://example.test -t 0
 expect_invalid -u https://example.test -f /tmp/vars-nonexistent-input
+expect_invalid -u https://example.test -f /tmp/vars-targets.txt
 
 printf 'OK: CLI\n'
