@@ -58,10 +58,16 @@ grep -F $'exit_status=0' "$OUT/meta/summary.txt" >/dev/null || fail "full pipeli
 
 # Machine-readable metadata must keep stable headers for downstream tooling.
 grep -Fx 
+
+printf 'OK: pipeline smoke\n'
 kind\tname\tstatus\trc\tduration_seconds\tdetail' "$OUT/meta/execution-status.tsv" >/dev/null || fail "cabeçalho de execution-status inválido"
 grep -Fx 
+
+printf 'OK: pipeline smoke\n'
 module\tfinished_at\tstatus\trc\tduration_seconds' "$OUT/meta/module-status.tsv" >/dev/null || fail "cabeçalho de module-status inválido"
 grep -Fx 
+
+printf 'OK: pipeline smoke\n'
 tool\tavailability\tlocation\tdetail' "$OUT/meta/tool-status.tsv" >/dev/null || fail "cabeçalho de tool-status inválido"
 
 printf 'OK: pipeline smoke\n'
