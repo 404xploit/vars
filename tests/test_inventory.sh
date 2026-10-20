@@ -37,4 +37,10 @@ for module in recon xss sqli nuclei log4j extended; do
     grep -F -- "run_module $module" "$SCRIPT" >/dev/null || fail "módulo ausente no pipeline: $module"
 done
 
+# Keep the security regression suite wired into the documented CI workflow.
+CI_FILE="$ROOT_DIR/.github/workflows/ci.yml"
+[[ -f "$CI_FILE" ]] || fail "workflow de CI ausente"
+grep -F 'tests/test_output_symlinks.sh' "$CI_FILE" >/dev/null || fail "teste de symlink fora do CI"
+grep -F 'shellcheck -x' "$CI_FILE" >/dev/null || fail "ShellCheck fora do CI"
+
 printf 'OK: inventory (%d tools, %d modes, %d CLI options)\n' "${#legacy_tools[@]}" "${#legacy_modes[@]}" "${#supported_options[@]}"
