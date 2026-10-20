@@ -63,4 +63,15 @@ mkdir -p "$TEST_DIR/normal-output"
 run_vars "$TEST_DIR/normal-output"
 [[ -f "$TEST_DIR/normal-output/meta/vars.log" ]] || fail "saída normal não foi criada"
 
+# Individual metadata files must also reject links before any write occurs.
+for metadata in summary.txt targets.txt out-of-scope.tsv; do
+    link_root="$TEST_DIR/meta-link-$metadata"
+    link_target="$TEST_DIR/meta-target-$metadata"
+    mkdir -p "$link_root/meta" "$link_target"
+    printf 'preserve-me\n' > "$link_target/sentinel"
+    ln -s "$link_target/sentinel" "$link_root/meta/$metadata"
+    expect_rejected "$link_root" "arquivo de metadados simbólico: $metadata"
+    [[ "$(cat "$link_target/sentinel")" == "preserve-me" ]] || fail "arquivo externo alterado por $metadata"
+done
+
 printf 'OK: output symlink protection\n'
