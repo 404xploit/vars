@@ -374,7 +374,7 @@ setup_output() {
             die "Caminho de saída deve ser um diretório: $OUTPUT_DIR/$path"
         fi
     done
-    for path in vars.log run.txt summary.txt tool-status.tsv module-status.tsv execution-status.tsv scope.txt out-of-scope.tsv; do
+    for path in vars.log run.txt summary.txt targets.txt tool-status.tsv module-status.tsv execution-status.tsv scope.txt out-of-scope.tsv; do
         [[ ! -L "$OUTPUT_DIR/meta/$path" ]] || die "Caminho de saída não pode ser link simbólico: $OUTPUT_DIR/meta/$path"
         if [[ -e "$OUTPUT_DIR/meta/$path" && ! -f "$OUTPUT_DIR/meta/$path" ]]; then
             die "Metadado de saída deve ser um arquivo regular: $OUTPUT_DIR/meta/$path"
@@ -391,7 +391,7 @@ setup_output() {
         [[ ! -L "$OUTPUT_DIR/$path" ]] || die "Caminho de saída não pode ser link simbólico: $OUTPUT_DIR/$path"
         [[ -d "$OUTPUT_DIR/$path" ]] || die "Caminho de saída deve ser um diretório: $OUTPUT_DIR/$path"
     done
-    for path in vars.log run.txt summary.txt tool-status.tsv module-status.tsv execution-status.tsv scope.txt out-of-scope.tsv; do
+    for path in vars.log run.txt summary.txt targets.txt tool-status.tsv module-status.tsv execution-status.tsv scope.txt out-of-scope.tsv; do
         [[ ! -L "$OUTPUT_DIR/meta/$path" ]] || die "Caminho de saída não pode ser link simbólico: $OUTPUT_DIR/meta/$path"
         if [[ -e "$OUTPUT_DIR/meta/$path" && ! -f "$OUTPUT_DIR/meta/$path" ]]; then
             die "Metadado de saída deve ser um arquivo regular: $OUTPUT_DIR/meta/$path"
