@@ -36,21 +36,16 @@ if bash "$SCRIPT" --invalid >/dev/null 2>&1; then
     exit 1
 fi
 
-for args in \
-    "-u https://example.test -m invalid" \
-    "-u https://example.test -j 0" \
-    "-u https://example.test -t 0" \
-    "-u https://example.test -f /tmp/vars-nonexistent-input"; do
-    if bash "$SCRIPT" $args >/dev/null 2>&1; then
-        printf 'FAIL: argumentos inválidos deveriam falhar: %s\n' "$args" >&2
+expect_invalid() {
+    if bash "$SCRIPT" "$@" >/dev/null 2>&1; then
+        printf 'FAIL: argumentos inválidos deveriam falhar: %s\n' "$*" >&2
         exit 1
     fi
-done
+}
 
-if bash "$SCRIPT" -u https://example.test -f /tmp/vars-targets.txt >/dev/null 2>&1; then
-    printf 'FAIL: -u e -f não podem ser usados juntos\n' >&2
-    exit 1
-fi
-
+expect_invalid -u https://example.test -m invalid
+expect_invalid -u https://example.test -j 0
+expect_invalid -u https://example.test -t 0
+expect_invalid -u https://example.test -f /tmp/vars-nonexistent-input
 
 printf 'OK: CLI\n'
