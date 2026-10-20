@@ -393,4 +393,8 @@ for index in "${!invalid_urls[@]}"; do
     [[ ! -e "$invalid_out" ]] || fail "authority inválida criou artefatos: ${invalid_urls[$index]}"
 done
 
+# Keep the scope exception log machine-readable for downstream auditing.
+grep -Fx 
+source\turl\taction\treason' "$OUT/meta/out-of-scope.tsv" >/dev/null || fail "cabeçalho de auditoria de escopo inválido"
+
 printf 'OK: scope enforcement\n'
